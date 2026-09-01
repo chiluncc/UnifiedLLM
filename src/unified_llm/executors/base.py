@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from unified_llm.messages.messages import MessageBase
+from unified_llm.tools import ToolExecutor, Tool
 
 
 class ClientException(Exception):
@@ -22,7 +23,7 @@ class ClientResult(TypedDict):
     expense: TokenExpense
 
 
-class Executor:
+class ClientExecutor:
     def __init__(self) -> None: ...
 
     def __iter__(self) -> Iterator[Any]: ...
@@ -57,8 +58,11 @@ class ClientBase(ABC):
         self._request_config = request_config
         self._tools: list = []
 
-    def set_tools(self, tools_desp: list | None = None) -> None:
-        self._tools = [] if tools_desp is None else tools_desp
+    def set_tools(self, tool_executor: ToolExecutor | None = None) -> None:
+        if tool_executor is None or len(tool_executor.list_tools()) == 0:
+            self._tools = []
+        else:
+            self._tools = [self._serialize_tool(t) for t in tool_executor.list_tools()]
 
     def get_tools(self) -> list:
         return self._tools
@@ -79,4 +83,7 @@ class ClientBase(ABC):
     async def ainvoke(self, messages: list[MessageBase]) -> ClientResult: ...
 
     @abstractmethod
-    def execute(self, messages: list[MessageBase]) -> Executor: ...
+    def execute(self, messages: list[MessageBase]) -> ClientExecutor: ...
+
+    @abstractmethod
+    def _serialize_tool(self, tool: Tool) -> Any: ...
