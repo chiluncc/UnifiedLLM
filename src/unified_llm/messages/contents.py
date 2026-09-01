@@ -151,3 +151,7 @@ class ContentToolText(ContentToolBase):
     @property
     def text(self) -> str:
         return self._text
+
+    @override
+    def copy(self) -> "ContentToolText":
+        return ContentToolText(self._text)

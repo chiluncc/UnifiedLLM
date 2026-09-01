@@ -1,19 +1,43 @@
+import openai
 from abc import ABC, abstractmethod
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from typing import override
 
-from unified_llm.messages.messages import MessageBase, AIMessage
-from ..base import Executer
+from unified_llm.messages.messages import MessageBase
+from ..base import ClientBase, ClientConfigBase, RequestConfigBase
+from ..base import ClientResult, TokenExpense, Executor
 
 
-class OpenAITextChatExecutorBase(ABC):
-    def invoke(messages: list[MessageBase]) -> Executer:
-        pass
+class OpenAITextChatClientBase(ClientBase, ABC):
+    def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
+        super().__init__(client_config, request_config)
+        self._client = openai.Client(**client_config.to_dict())
+        
+    @override
+    def invoke(self, messages: list[MessageBase]) -> ClientResult:
+        response = self._client.chat.completions.create(
+            messages=self._unserialize_messages(messages),
+            tools=self.get_tools(),
+            **self.get_request_conifg().to_dict(),
+        )
+        return ClientResult(
+            messages=messages + self._serialize_response(response), 
+            expense=self._extract_expense(response)
+            )
 
-    async def ainvoke(messages: list[MessageBase]) -> Executer:
-        pass
+    @override
+    async def ainvoke(self, messages: list[MessageBase]) -> ClientResult:
+        return None
+
+    @override
+    def execute(self, messages: list[MessageBase]) -> Executor:
+        return None
+    
+    @abstractmethod
+    def _unserialize_messages(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]: ...
 
     @abstractmethod
-    def before_chat_parse_message(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]: ...
+    def _serialize_response(self, response: ChatCompletion) -> list[MessageBase]: ...
 
     @abstractmethod
-    def after_chat_parse_message(self, response: ChatCompletion) -> list[AIMessage]: ...
+    def _extract_expense(self, response: ChatCompletion) -> TokenExpense: ...
