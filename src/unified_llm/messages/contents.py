@@ -27,13 +27,18 @@ class ContentAIBase(ContentBase, ABC):
     def copy(self) -> "ContentAIBase": ...
 
 
+class ContentToolBase(ContentBase, ABC):
+    @override
+    def copy(self) -> "ContentToolBase": ...
+
+
 ################################
 
 
 class ContentSystemText(ContentSystemBase):
-    def __init__(self, content: str):
+    def __init__(self, text: str):
         super().__init__()
-        self._text = content
+        self._text: str = text
 
     @property
     def text(self) -> str:
@@ -48,9 +53,9 @@ class ContentSystemText(ContentSystemBase):
 
 
 class ContentHumanText(ContentHumanBase):
-    def __init__(self, content: str):
+    def __init__(self, text: str):
         super().__init__()
-        self._text = content
+        self._text: str = text
 
     @property
     def text(self) -> str:
@@ -65,9 +70,9 @@ class ContentHumanText(ContentHumanBase):
 
 
 class ContentAIText(ContentAIBase):
-    def __init__(self, content: str):
+    def __init__(self, text: str):
         super().__init__()
-        self._text = content
+        self._text: str = text
 
     @property
     def text(self) -> str:
@@ -105,3 +110,44 @@ class ContentReasoning(ContentBase):
             reasoning_content=self._reasoning_content,
             reasoning_summary=self._reasoning_summary,
         )
+
+
+class ContentToolCall(ContentBase):
+    def __init__(self, tool_name: str, tool_args: str, tool_id: str):
+        super().__init__()
+        self._tool_name: str = tool_name
+        self._tool_args: str = tool_args
+        self._tool_id: str = tool_id
+
+    @property
+    def tool_name(self) -> str | None:
+        return self._tool_name
+
+    @property
+    def tool_args(self) -> str | None:
+        return self._tool_args
+
+    @property
+    def tool_id(self) -> str | None:
+        return self._tool_id
+
+    @override
+    def copy(self) -> "ContentToolCall":
+        return ContentToolCall(
+            tool_name=self._tool_name,
+            tool_args=self._tool_args,
+            tool_id=self._tool_id,
+        )
+
+
+################################
+
+
+class ContentToolText(ContentToolBase):
+    def __init__(self, text: str):
+        super().__init__()
+        self._text: str = text
+
+    @property
+    def text(self) -> str:
+        return self._text
