@@ -1,5 +1,4 @@
 import inspect
-
 import openai
 from abc import ABC, abstractmethod
 from docstring_parser import Style
@@ -17,7 +16,6 @@ class OpenAITextChatClientBase(ClientBase, ABC):
     def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
         super().__init__(client_config, request_config)
         self._client = openai.Client(**client_config.to_dict())
-        self._async_client = openai.AsyncClient(**client_config.to_dict())
         
     @override
     def invoke(self, messages: list[MessageBase]) -> ClientResult:
@@ -33,11 +31,12 @@ class OpenAITextChatClientBase(ClientBase, ABC):
 
     @override
     async def ainvoke(self, messages: list[MessageBase]) -> ClientResult:
-        response = await self._async_client.chat.completions.create(
-            messages=self._unserialize_messages(messages),
-            tools=self.get_tools(),
-            **self.get_request_conifg().to_dict(),
-        )
+        async with openai.AsyncClient(**self.get_client_config().to_dict()) as async_client:
+            response = await async_client.chat.completions.create(
+                messages=self._unserialize_messages(messages),
+                tools=self.get_tools(),
+                **self.get_request_conifg().to_dict(),
+            )
         return ClientResult(
             messages=messages + self._serialize_response(response),
             expense=self._extract_expense(response),
@@ -45,7 +44,7 @@ class OpenAITextChatClientBase(ClientBase, ABC):
 
     @override
     def execute(self, messages: list[MessageBase]) -> ClientExecutor:
-        return None
+        pass
 
     @override
     def _serialize_tool(self, tool: Tool) -> dict:
