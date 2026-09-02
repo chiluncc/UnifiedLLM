@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from unified_llm.messages.messages import MessageBase
 from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkEmpty
-from unified_llm.tools import ToolExecutor, Tool
+from unified_llm.tools import ToolExecutorBase, Tool
 
 
 class ClientException(Exception):
@@ -99,11 +99,13 @@ class ClientBase(ABC):
         self._request_config = request_config
         self._tools: list = []
 
-    def set_tools(self, tool_executor: ToolExecutor | None = None) -> None:
-        if tool_executor is None or len(tool_executor.list_tools()) == 0:
-            self._tools = []
+    def set_tools(self, tools: ToolExecutorBase | list[Tool] | None = None) -> None:
+        if isinstance(tools, ToolExecutorBase):
+            self._tools = [self._serialize_tool(t) for t in tools.list_tools()]
+        elif isinstance(tools, list) and all([isinstance(t, Tool) for t in tools]):
+            self._tools = [self._serialize_tool(t) for t in tools]
         else:
-            self._tools = [self._serialize_tool(t) for t in tool_executor.list_tools()]
+            self._tools = []
 
     def get_tools(self) -> list:
         return self._tools

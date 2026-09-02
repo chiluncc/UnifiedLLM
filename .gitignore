@@ -13,3 +13,6 @@ uv.lock
 # Test
 test
 tests
+
+# Env
+.keys

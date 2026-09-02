@@ -1,14 +1,12 @@
 import inspect
-import json
 from typing import Any, Callable, get_type_hints
-
+from abc import ABC, abstractmethod
 from docstring_parser import Style
 from docstring_parser import parse as parse_docstring
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, Field, create_model
 
 from unified_llm.messages.messages import ToolMessage
 from unified_llm.messages.contents import ContentToolCall
-from unified_llm.messages.contents import ContentToolBase, ContentToolText
 
 
 class ToolException(Exception):
@@ -19,6 +17,7 @@ class ToolException(Exception):
 class Tool(BaseModel, frozen=True):
     name: str
     args: type[BaseModel]
+    sync: bool
     func: Callable
 
 
@@ -48,59 +47,21 @@ def tool(func: Callable | None = None, *, name: str | None = None) -> Tool | Cal
         tool_name = name if name is not None else fn.__name__
         param_descs = _parse_docstring(fn)
         args_model = _build_args_model(fn, param_descs)
-        return Tool(name=tool_name, args=args_model, func=fn)
+        return Tool(
+            name=tool_name,
+            args=args_model,
+            sync=not inspect.iscoroutinefunction(fn),
+            func=fn,
+        )
 
     if func is None:
         return _decorator
     return _decorator(func)
 
 
-class ToolExecutor:
-    def __init__(self, tools: list[Tool]) -> None:
-        self._tools: dict[str, Tool] = {t.name: t for t in tools}
+class ToolExecutorBase(ABC):
+    @abstractmethod
+    def list_tools(self) -> list[Tool]: ...
 
-    def list_tools(self) -> list[Tool]:
-        return list(self._tools.values())
-
-    def execute(self, toolcall: ContentToolCall) -> ToolMessage:
-        tool_def = self._tools.get(toolcall.tool_name)
-        if tool_def is None:
-            return ToolMessage(
-                ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
-                toolcall=toolcall,
-            )
-
-        try:
-            raw_args = json.loads(toolcall.tool_args or "{}")
-        except json.JSONDecodeError as exc:
-            raise ToolException(f"Invalid JSON args for tool {toolcall.tool_name}: {toolcall.tool_args!r}") from exc
-        if not isinstance(raw_args, dict):
-            raise ToolException(f"Tool args must be a JSON object, got: {toolcall.tool_args!r}")
-
-        try:
-            validated = tool_def.args.model_validate(raw_args)
-        except ValidationError as exc:
-            errors = exc.errors()
-            missing = [str(err["loc"][0]) for err in errors if err["type"] == "missing"]
-            if missing:
-                return ToolMessage(
-                    ContentToolText(f"Missing required arguments: {', '.join(missing)}"),
-                    toolcall=toolcall,
-                )
-            details = "; ".join(
-                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
-            )
-            return ToolMessage(
-                ContentToolText(f"Invalid arguments: {details}"),
-                toolcall=toolcall,
-            )
-
-        result = tool_def.func(**validated.model_dump())
-        contents: ContentToolBase | list[ContentToolBase]
-        if isinstance(result, ContentToolBase):
-            contents = [result]
-        elif isinstance(result, list) and all(isinstance(item, ContentToolBase) for item in result):
-            contents = result
-        else:
-            contents = ContentToolText(str(result))
-        return ToolMessage(contents, toolcall=toolcall)
+    @abstractmethod
+    def execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
