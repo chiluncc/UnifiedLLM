@@ -1,78 +1,49 @@
 import asyncio
-import json
-from typing import override
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Awaitable, override
 
-from pydantic import ValidationError
-
-from unified_llm.messages.contents import ContentToolBase, ContentToolCall, ContentToolText
+from unified_llm.messages.contents import ContentToolCall
 from unified_llm.messages.messages import ToolMessage
-from .base import Tool, ToolExecutorBase, ToolException
+from .base import Tool, ToolExecutorBase
+
+
+def _run_async_tool(awaitable: Awaitable[Any]) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, awaitable)
+        return future.result()
 
 
 class ToolExecutorSimple(ToolExecutorBase):
     def __init__(self, tools: list[Tool]) -> None:
-        self._tools: dict[str, Tool] = {t.name: t for t in tools}
+        super().__init__(tools)
 
-    @override
-    def list_tools(self) -> list[Tool]:
-        return list(self._tools.values())
-
-    @override
-    def execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+    def _execute_serial(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
         results: list[ToolMessage] = []
         for toolcall in toolcalls:
-            tool_def = self._tools.get(toolcall.tool_name)
-            if tool_def is None:
-                results.append(
-                    ToolMessage(
-                        ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
-                        toolcall=toolcall,
-                    )
-                )
+            resolved = self._resolve_toolcall(toolcall)
+            if isinstance(resolved, ToolMessage):
+                results.append(resolved)
                 continue
-
-            try:
-                raw_args = json.loads(toolcall.tool_args or "{}")
-            except json.JSONDecodeError as exc:
-                raise ToolException(f"Invalid JSON args for tool {toolcall.tool_name}: {toolcall.tool_args!r}") from exc
-            if not isinstance(raw_args, dict):
-                raise ToolException(f"Tool args must be a JSON object, got: {toolcall.tool_args!r}")
-
-            try:
-                validated = tool_def.args.model_validate(raw_args)
-            except ValidationError as exc:
-                errors = exc.errors()
-                missing = [str(err["loc"][0]) for err in errors if err["type"] == "missing"]
-                if missing:
-                    results.append(
-                        ToolMessage(
-                            ContentToolText(f"Missing required arguments: {', '.join(missing)}"),
-                            toolcall=toolcall,
-                        )
-                    )
-                else:
-                    details = "; ".join(
-                        f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
-                    )
-                    results.append(
-                        ToolMessage(
-                            ContentToolText(f"Invalid arguments: {details}"),
-                            toolcall=toolcall,
-                        )
-                    )
-                continue
-
-            if tool_def.sync:
-                result = tool_def.func(**validated.model_dump())
+            if resolved.tool.sync:
+                result = resolved.tool.func(**resolved.args.model_dump())
             else:
-                result = asyncio.run(tool_def.func(**validated.model_dump()))
-
-            contents: ContentToolBase | list[ContentToolBase]
-            if isinstance(result, ContentToolBase):
-                contents = [result]
-            elif isinstance(result, list) and all(isinstance(item, ContentToolBase) for item in result):
-                contents = result
-            else:
-                contents = ContentToolText(str(result))
-            results.append(ToolMessage(contents, toolcall=toolcall))
+                result = _run_async_tool(resolved.tool.func(**resolved.args.model_dump()))
+            results.append(self._wrap_result(toolcall, result))
         return results
+
+    @override
+    def sync_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+        return self._execute_serial(toolcalls)
+
+    @override
+    def async_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+        return self._execute_serial(toolcalls)
+
+    @override
+    def mixed_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+        return self._execute_serial(toolcalls)

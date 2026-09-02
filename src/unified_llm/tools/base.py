@@ -1,12 +1,14 @@
 import inspect
-from typing import Any, Callable, get_type_hints
+import json
+from dataclasses import dataclass
+from typing import Any, Callable, Literal, get_type_hints
 from abc import ABC, abstractmethod
 from docstring_parser import Style
 from docstring_parser import parse as parse_docstring
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from unified_llm.messages.messages import ToolMessage
-from unified_llm.messages.contents import ContentToolCall
+from unified_llm.messages.contents import ContentToolBase, ContentToolCall, ContentToolText
 
 
 class ToolException(Exception):
@@ -19,6 +21,13 @@ class Tool(BaseModel, frozen=True):
     args: type[BaseModel]
     sync: bool
     func: Callable
+
+
+@dataclass(frozen=True)
+class ResolvedToolCall:
+    toolcall: ContentToolCall
+    tool: Tool
+    args: BaseModel
 
 
 def tool(func: Callable | None = None, *, name: str | None = None) -> Tool | Callable[..., Any]:
@@ -60,8 +69,88 @@ def tool(func: Callable | None = None, *, name: str | None = None) -> Tool | Cal
 
 
 class ToolExecutorBase(ABC):
-    @abstractmethod
-    def list_tools(self) -> list[Tool]: ...
+    def __init__(self, tools: list[Tool]) -> None:
+        super().__init__()
+        self._tools: dict[str, Tool] = {t.name: t for t in tools}
+
+        def _classify_mode() -> Literal["sync", "async", "mixed"]:
+            sync_flags = [tool_def.sync for tool_def in self._tools.values()]
+            if all(sync_flags):
+                return "sync"
+            if not any(sync_flags):
+                return "async"
+            return "mixed"
+
+        self._mode = _classify_mode()
+
+    def list_tools(self) -> list[Tool]:
+        return list(self._tools.values())
+
+    def _resolve_toolcall(self, toolcall: ContentToolCall) -> ResolvedToolCall | ToolMessage:
+        tool_def = self._tools.get(toolcall.tool_name)
+        if tool_def is None:
+            return ToolMessage(
+                ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
+                toolcall=toolcall,
+            )
+
+        try:
+            raw_args = json.loads(toolcall.tool_args or "{}")
+        except json.JSONDecodeError:
+            return ToolMessage(
+                ContentToolText(
+                    f"Invalid JSON args for tool {toolcall.tool_name}: {toolcall.tool_args!r}"
+                ),
+                toolcall=toolcall,
+            )
+        if not isinstance(raw_args, dict):
+            return ToolMessage(
+                ContentToolText(f"Tool args must be a JSON object, got: {toolcall.tool_args!r}"),
+                toolcall=toolcall,
+            )
+
+        try:
+            validated = tool_def.args.model_validate(raw_args)
+        except ValidationError as exc:
+            errors = exc.errors()
+            missing = [str(err["loc"][0]) for err in errors if err["type"] == "missing"]
+            if missing:
+                text = f"Missing required arguments: {', '.join(missing)}"
+            else:
+                details = "; ".join(
+                    f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
+                )
+                text = f"Invalid arguments: {details}"
+            return ToolMessage(ContentToolText(text), toolcall=toolcall)
+
+        return ResolvedToolCall(toolcall=toolcall, tool=tool_def, args=validated)
+
+    def _wrap_result(self, toolcall: ContentToolCall, result: Any) -> ToolMessage:
+        contents: ContentToolBase | list[ContentToolBase]
+        if isinstance(result, ContentToolBase):
+            contents = [result]
+        elif isinstance(result, list) and all(isinstance(item, ContentToolBase) for item in result):
+            contents = result
+        else:
+            contents = ContentToolText(str(result))
+        return ToolMessage(contents, toolcall=toolcall)
+
+    def execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+        if not toolcalls:
+            return []
+        match self._mode:
+            case "sync":
+                return self.sync_execute(toolcalls)
+            case "async":
+                return self.async_execute(toolcalls)
+            case "mixed":
+                return self.mixed_execute(toolcalls)
 
     @abstractmethod
-    def execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+    def sync_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+
+    @abstractmethod
+    def async_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+
+    @abstractmethod
+    def mixed_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
