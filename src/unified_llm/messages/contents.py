@@ -120,15 +120,15 @@ class ContentToolCall(ContentBase):
         self._tool_id: str = tool_id
 
     @property
-    def tool_name(self) -> str | None:
+    def tool_name(self) -> str:
         return self._tool_name
 
     @property
-    def tool_args(self) -> str | None:
+    def tool_args(self) -> str:
         return self._tool_args
 
     @property
-    def tool_id(self) -> str | None:
+    def tool_id(self) -> str:
         return self._tool_id
 
     @override

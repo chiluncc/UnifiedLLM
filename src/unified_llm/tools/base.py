@@ -1,6 +1,5 @@
 import inspect
 import json
-from dataclasses import dataclass
 from typing import Any, Callable, get_type_hints
 
 from docstring_parser import Style
@@ -17,8 +16,7 @@ class ToolException(Exception):
         super().__init__(*args)
 
 
-@dataclass
-class Tool:
+class Tool(BaseModel, frozen=True):
     name: str
     args: type[BaseModel]
     func: Callable
@@ -66,7 +64,12 @@ class ToolExecutor:
 
     def execute(self, toolcall: ContentToolCall) -> ToolMessage:
         tool_def = self._tools.get(toolcall.tool_name)
-        
+        if tool_def is None:
+            return ToolMessage(
+                ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
+                toolcall=toolcall,
+            )
+
         try:
             raw_args = json.loads(toolcall.tool_args or "{}")
         except json.JSONDecodeError as exc:
@@ -77,15 +80,22 @@ class ToolExecutor:
         try:
             validated = tool_def.args.model_validate(raw_args)
         except ValidationError as exc:
-            missing = [str(err["loc"][0]) for err in exc.errors() if err["type"] == "missing"]
+            errors = exc.errors()
+            missing = [str(err["loc"][0]) for err in errors if err["type"] == "missing"]
             if missing:
                 return ToolMessage(
                     ContentToolText(f"Missing required arguments: {', '.join(missing)}"),
                     toolcall=toolcall,
                 )
+            details = "; ".join(
+                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
+            )
+            return ToolMessage(
+                ContentToolText(f"Invalid arguments: {details}"),
+                toolcall=toolcall,
+            )
 
         result = tool_def.func(**validated.model_dump())
-
         contents: ContentToolBase | list[ContentToolBase]
         if isinstance(result, ContentToolBase):
             contents = [result]

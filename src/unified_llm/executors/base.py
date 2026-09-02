@@ -1,8 +1,11 @@
+import queue
+import threading
 from typing import TypedDict, Iterator, Any
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from pydantic import BaseModel
 
 from unified_llm.messages.messages import MessageBase
+from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkEmpty
 from unified_llm.tools import ToolExecutor, Tool
 
 
@@ -23,30 +26,68 @@ class ClientResult(TypedDict):
     expense: TokenExpense
 
 
-class ClientExecutor:
-    def __init__(self) -> None: ...
+class ClientExecutor(ABC):
+    def __init__(self) -> None:
+        self._cancel_event = threading.Event()
+        self._done_event = threading.Event()
+        self._queue: queue.Queue[Any] = queue.Queue()
+        self._result: ClientResult | None = None
+        self._exception: Exception | None = None
+        self._thread = threading.Thread(target=self._thread_container, daemon=True)
 
-    def __iter__(self) -> Iterator[Any]: ...
+    def __iter__(self) -> Iterator[StreamChunkBase]:
+        return self
 
-    def __next__(self) -> Any: ...
+    def __next__(self) -> StreamChunkBase:
+        if self._done_event.is_set() and self._queue.empty():
+            raise StopIteration
+        try:
+            return self._queue.get(timeout=0.1)
+        except queue.Empty:
+            return StreamChunkEmpty()
 
-    def done(self) -> bool: ...
+    def done(self) -> bool:
+        return self._done_event.is_set()
 
-    def cancel(self) -> bool: ...
+    def cancel(self) -> bool:
+        if self._done_event.is_set():
+            return False
+        self._cancel_event.set()
+        return True
 
-    def result(self) -> ClientResult: ...
+    def result(self) -> ClientResult | None:
+        return self._result
 
-    def exception(self) -> Exception: ...
+    def exception(self) -> Exception | None:
+        return self._exception
+
+    def _thread_start(self) -> None:
+        self._thread.start()
+
+    def _thread_container(self) -> None:
+        try:
+            self._result = self._thread_content()
+        except Exception as exc:
+            self._exception = exc
+        finally:
+            self._done_event.set()
+
+    def _push_chunk(self, chunk: StreamChunkBase) -> None:
+        self._queue.put(chunk)
+
+    def _cancelled(self) -> bool:
+        return self._cancel_event.is_set()
+
+    @abstractmethod
+    def _thread_content(self) -> ClientResult: ...
 
 
-@dataclass
-class ClientConfigBase(ABC):
+class ClientConfigBase(BaseModel, ABC, frozen=True):
     @abstractmethod
     def to_dict(self) -> dict[str, Any]: ...
 
 
-@dataclass
-class RequestConfigBase(ABC):
+class RequestConfigBase(BaseModel, ABC, frozen=True):
     @abstractmethod
     def to_dict(self) -> dict[str, Any]: ...
 
@@ -70,7 +111,7 @@ class ClientBase(ABC):
     def set_request_config(self, request_config: RequestConfigBase) -> None:
         self._request_config = request_config
 
-    def get_request_conifg(self) -> RequestConfigBase:
+    def get_request_config(self) -> RequestConfigBase:
         return self._request_config
     
     def get_client_config(self) -> ClientConfigBase:

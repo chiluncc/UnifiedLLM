@@ -1,12 +1,12 @@
-from dataclasses import dataclass, field
 from datetime import datetime, time
+from pydantic import Field
 from typing import Any, override, Literal
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCompletionChunk
 
 from .base import OpenAITextChatClientBase
-from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException
-from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResult
+from unified_llm.messages.messages import MessageBase, AIMessage, HumanMessage, SystemMessage, ToolMessage
+from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
 from unified_llm.messages.contents import ContentAIText
 from unified_llm.messages.contents import ContentHumanText
 from unified_llm.messages.contents import ContentSystemText
@@ -14,20 +14,18 @@ from unified_llm.messages.contents import ContentToolText
 from unified_llm.messages.contents import ContentReasoning, ContentToolCall
 
 
-@dataclass
 class DeepSeekV4ClientConfig(ClientConfigBase):
     api_key: str
-    base_url: str = field(default="https://api.deepseek.com")
+    base_url: str = Field(default="https://api.deepseek.com")
 
     @override
     def to_dict(self) -> dict[str, Any]:
         return {"api_key": self.api_key, "base_url": self.base_url}
 
 
-@dataclass
 class DeepSeekV4RequestConfig(RequestConfigBase):
-    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = field(default="deepseek-v4-flash")
-    reasoning_effort: Literal["none", "low", "high", "max"] = field(default="high")
+    model: Literal["deepseek-v4-flash", "deepseek-v4-pro"] = Field(default="deepseek-v4-flash")
+    reasoning_effort: Literal["none", "low", "high", "max"] = Field(default="high")
 
     @override
     def to_dict(self) -> dict[str, Any]:
@@ -47,6 +45,78 @@ class DeepSeekV4RequestConfig(RequestConfigBase):
 class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
     def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
         super().__init__(client_config, request_config)
+
+    def _serialize_response(self, response: ChatCompletion) -> list[MessageBase]:
+        if not response.choices:
+            return []
+        raw = response.choices[0].message
+
+        contents: list[ContentAIText] = []
+        if raw.content is not None:
+            contents.append(ContentAIText(raw.content))
+
+        reasoning: ContentReasoning | None = None
+        reasoning_content = getattr(raw, "reasoning_content", None)
+        if isinstance(reasoning_content, str) and reasoning_content:
+            reasoning = ContentReasoning(reasoning_content=reasoning_content)
+
+        toolcalls: list[ContentToolCall] = []
+        for tc in raw.tool_calls or []:
+            toolcalls.append(
+                ContentToolCall(
+                    tool_name=tc.function.name,
+                    tool_args=tc.function.arguments,
+                    tool_id=tc.id,
+                )
+            )
+
+        return [AIMessage(contents=contents, reasoning=reasoning, toolcalls=toolcalls)]
+
+    def _compute_expense(self, model: str, usage) -> TokenExpense:
+        _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
+            "deepseek-v4-flash": {
+                "peak": (0.10, 3.00, 9.00),
+                "offpeak": (0.05, 1.50, 4.50),
+            },
+            "deepseek-v4-pro": {
+                "peak": (0.30, 9.00, 27.00),
+                "offpeak": (0.15, 4.50, 13.50),
+            },
+        }
+
+        def _is_peak_period(now: datetime) -> bool:
+            if now.weekday() >= 5:
+                return False
+            return time(9, 0) <= now.time() < time(12, 0) or time(14, 0) <= now.time() < time(18, 0)
+
+        if usage is None:
+            return TokenExpense(token_input=None, token_output=None, token_cached=None, token_expense=None)
+
+        token_input = usage.prompt_tokens
+        token_output = usage.completion_tokens
+        token_cached = getattr(usage, "prompt_cache_hit_tokens", None)
+        if token_cached is None and usage.prompt_tokens_details is not None:
+            token_cached = usage.prompt_tokens_details.cached_tokens
+
+        token_expense: float | None = None
+        prices = _DEEPSEEK_V4_PRICES.get(model)
+        if prices is not None:
+            cache_hit_price, cache_miss_price, output_price = prices[
+                "peak" if _is_peak_period(datetime.now()) else "offpeak"
+            ]
+            cached = token_cached if token_cached is not None else 0
+            token_expense = (
+                cached * cache_hit_price
+                + max(token_input - cached, 0) * cache_miss_price
+                + token_output * output_price
+            ) / 1_000_000
+
+        return TokenExpense(
+            token_input=token_input,
+            token_output=token_output,
+            token_cached=token_cached,
+            token_expense=token_expense,
+        )
 
     @override
     def _unserialize_messages(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]:
@@ -104,76 +174,90 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
         return unserialized
 
     @override
-    def _serialize_response(self, response: ChatCompletion) -> list[MessageBase]:
-        if not response.choices:
-            return []
-        raw = response.choices[0].message
-
-        contents: list[ContentAIText] = []
-        if raw.content is not None:
-            contents.append(ContentAIText(raw.content))
-
-        reasoning: ContentReasoning | None = None
-        reasoning_content = getattr(raw, "reasoning_content", None)
-        if isinstance(reasoning_content, str) and reasoning_content:
-            reasoning = ContentReasoning(reasoning_content=reasoning_content)
-
-        toolcalls: list[ContentToolCall] = []
-        for tc in raw.tool_calls or []:
-            toolcalls.append(
-                ContentToolCall(
-                    tool_name=tc.function.name,
-                    tool_args=tc.function.arguments,
-                    tool_id=tc.id,
-                )
-            )
-
-        return [AIMessage(contents=contents, reasoning=reasoning, toolcalls=toolcalls)]
+    def _parse_response(self, response: ChatCompletion) -> ClientResult:
+        return ClientResult(
+            messages=self._serialize_response(response),
+            expense=self._compute_expense(response.model, response.usage),
+        )
 
     @override
-    def _extract_expense(self, response: ChatCompletion) -> TokenExpense:
-        _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
-            "deepseek-v4-flash": {
-                "peak": (0.10, 3.00, 9.00),
-                "offpeak": (0.05, 1.50, 4.50),
-            },
-            "deepseek-v4-pro": {
-                "peak": (0.30, 9.00, 27.00),
-                "offpeak": (0.15, 4.50, 13.50),
-            },
-        }
+    def _parse_stream_chunk(self, response_chunk: ChatCompletionChunk) -> list[StreamChunkBase]:
+        if not response_chunk.choices:
+            return []
+        choice = response_chunk.choices[0]
+        finish = choice.finish_reason == "tool_calls"
+        fragments: list[StreamChunkBase] = []
 
-        def _is_peak_period(now: datetime) -> bool:
-            if now.weekday() >= 5:
-                return False
-            return time(9, 0) <= now.time() < time(12, 0) or time(14, 0) <= now.time() < time(18, 0)
+        reasoning = getattr(choice.delta, "reasoning_content", None)
+        if isinstance(reasoning, str) and reasoning:
+            fragments.append(StreamChunkReasoning(text=reasoning))
+        if choice.delta.content:
+            fragments.append(StreamChunkText(text=choice.delta.content))
+        for tc in choice.delta.tool_calls or []:
+            function = tc.function
+            fragments.append(
+                StreamChunkToolCall(
+                    index=tc.index,
+                    finish=finish,
+                    tool_id=tc.id,
+                    tool_name=function.name if function else None,
+                    tool_args=function.arguments if function else None,
+                )
+            )
+        return fragments
 
-        usage = response.usage
-        if usage is None:
-            return TokenExpense(token_input=None, token_output=None, token_cached=None, token_expense=None)
+    @override
+    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResult:
+        reasoning_parts: list[str] = []
+        text_parts: list[str] = []
+        toolcalls: dict[int, dict[str, str | None]] = {}
+        model: str | None = None
+        usage = None
 
-        token_input = usage.prompt_tokens
-        token_output = usage.completion_tokens
-        token_cached = getattr(usage, "prompt_cache_hit_tokens", None)
-        if token_cached is None and usage.prompt_tokens_details is not None:
-            token_cached = usage.prompt_tokens_details.cached_tokens
+        for chunk in response_chunks:
+            if model is None and chunk.model:
+                model = chunk.model
+            if chunk.usage is not None:
+                usage = chunk.usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            reasoning = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning, str) and reasoning:
+                reasoning_parts.append(reasoning)
+            if delta.content:
+                text_parts.append(delta.content)
+            for tc in delta.tool_calls or []:
+                partial = toolcalls.setdefault(
+                    tc.index,
+                    {"tool_id": None, "tool_name": None, "tool_args": ""},
+                )
+                if tc.id:
+                    partial["tool_id"] = tc.id
+                function = tc.function
+                if function:
+                    if function.name:
+                        partial["tool_name"] = function.name
+                    if function.arguments:
+                        partial["tool_args"] += function.arguments
 
-        token_expense: float | None = None
-        prices = _DEEPSEEK_V4_PRICES.get(response.model)
-        if prices is not None:
-            cache_hit_price, cache_miss_price, output_price = prices[
-                "peak" if _is_peak_period(datetime.now()) else "offpeak"
-            ]
-            cached = token_cached if token_cached is not None else 0
-            token_expense = (
-                cached * cache_hit_price
-                + max(token_input - cached, 0) * cache_miss_price
-                + token_output * output_price
-            ) / 1_000_000
-
-        return TokenExpense(
-            token_input=token_input,
-            token_output=token_output,
-            token_cached=token_cached,
-            token_expense=token_expense,
+        contents = [ContentAIText("".join(text_parts))] if text_parts else []
+        reasoning_content = "".join(reasoning_parts)
+        reasoning = ContentReasoning(reasoning_content=reasoning_content) if reasoning_content else None
+        toolcall_list = [
+            ContentToolCall(
+                tool_name=partial["tool_name"] or "",
+                tool_args=partial["tool_args"],
+                tool_id=partial["tool_id"] or "",
+            )
+            for _, partial in sorted(toolcalls.items())
+        ]
+        messages = (
+            [AIMessage(contents=contents, reasoning=reasoning, toolcalls=toolcall_list)]
+            if contents or reasoning or toolcall_list
+            else []
+        )
+        return ClientResult(
+            messages=messages,
+            expense=self._compute_expense(model or "", usage),
         )
