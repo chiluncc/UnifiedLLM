@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from docstring_parser import Style
 from docstring_parser import parse as parse_docstring
 from pydantic import BaseModel, Field, ValidationError, create_model
+from dataclasses import dataclass
 
 from unified_llm.messages.messages import ToolMessage
 from unified_llm.messages.contents import ContentToolBase, ContentToolCall, ContentToolText
@@ -22,7 +23,8 @@ class Tool(BaseModel, frozen=True):
     func: Callable
 
 
-class ResolvedContentToolCall(BaseModel):
+@dataclass(frozen=True, slots=True)
+class ResolvedContentToolCall:
     toolcall: ContentToolCall
     tool: Tool
     args: BaseModel
