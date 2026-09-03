@@ -1,6 +1,5 @@
 import inspect
 import json
-from dataclasses import dataclass
 from typing import Any, Callable, Literal, get_type_hints
 from abc import ABC, abstractmethod
 from docstring_parser import Style
@@ -23,8 +22,7 @@ class Tool(BaseModel, frozen=True):
     func: Callable
 
 
-@dataclass(frozen=True)
-class ResolvedToolCall:
+class ResolvedContentToolCall(BaseModel):
     toolcall: ContentToolCall
     tool: Tool
     args: BaseModel
@@ -86,7 +84,7 @@ class ToolExecutorBase(ABC):
     def list_tools(self) -> list[Tool]:
         return list(self._tools.values())
 
-    def _resolve_toolcall(self, toolcall: ContentToolCall) -> ResolvedToolCall | ToolMessage:
+    def _resolve_toolcall(self, toolcall: ContentToolCall) -> ResolvedContentToolCall | ToolMessage:
         tool_def = self._tools.get(toolcall.tool_name)
         if tool_def is None:
             return ToolMessage(
@@ -123,7 +121,7 @@ class ToolExecutorBase(ABC):
                 text = f"Invalid arguments: {details}"
             return ToolMessage(ContentToolText(text), toolcall=toolcall)
 
-        return ResolvedToolCall(toolcall=toolcall, tool=tool_def, args=validated)
+        return ResolvedContentToolCall(toolcall=toolcall, tool=tool_def, args=validated)
 
     def _wrap_result(self, toolcall: ContentToolCall, result: Any) -> ToolMessage:
         contents: ContentToolBase | list[ContentToolBase]

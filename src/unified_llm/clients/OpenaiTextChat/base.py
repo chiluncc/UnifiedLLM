@@ -127,7 +127,7 @@ class OpenAITextChatClientBase(ClientBase, ABC):
         )
 
     @override
-    def execute(self, messages: list[MessageBase]) -> ClientExecutor:
+    def execute(self, messages: list[MessageBase]) -> OpenAITextChatClientExecutor:
         return OpenAITextChatClientExecutor(self, messages)
 
     @override
