@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import uuid
 import openai
 from abc import ABC, abstractmethod
 from docstring_parser import Style
@@ -9,7 +10,13 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCo
 from typing import override, Callable
 
 from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
+from unified_llm.messages.stream_chunk import (
+    StreamChunkBase,
+    StreamChunkEmpty,
+    StreamChunkReasoning,
+    StreamChunkText,
+    StreamChunkToolCall,
+)
 from unified_llm.tools import Tool
 from ..base import ClientBase, ClientConfigBase, RequestConfigBase
 from ..base import ClientResult, ClientExecutor, ClientException
@@ -39,9 +46,18 @@ class OpenAITextChatClientExecutor(ClientExecutor):
         )
 
         raw_chunks: list[ChatCompletionChunk] = []
-        reasoning: str = ""
-        text: str = ""
+        class_uuids: dict[type, str] = {}
         pending_toolcalls: dict[int, dict[str, str | None]] = {}
+
+        def _class_uuid(fragment: StreamChunkReasoning | StreamChunkText) -> str:
+            return class_uuids.setdefault(type(fragment), str(uuid.uuid4()))
+
+        def _push_text_fragment(fragment: StreamChunkReasoning | StreamChunkText) -> None:
+            if not fragment.text:
+                return
+            self._push_chunk(
+                fragment.model_copy(update={"uuid": _class_uuid(fragment)})
+            )
 
         def _flush_toolcalls() -> None:
             for index in sorted(pending_toolcalls):
@@ -63,13 +79,9 @@ class OpenAITextChatClientExecutor(ClientExecutor):
             for fragment in self._parse_stream_chunk(raw):
                 match fragment:
                     case StreamChunkReasoning():
-                        if fragment.text:
-                            reasoning += fragment.text
-                            self._push_chunk(StreamChunkReasoning(text=reasoning))
+                        _push_text_fragment(fragment)
                     case StreamChunkText():
-                        if fragment.text:
-                            text += fragment.text
-                            self._push_chunk(StreamChunkText(text=text))
+                        _push_text_fragment(fragment)
                     case StreamChunkToolCall() as toolcall:
                         partial = pending_toolcalls.setdefault(
                             toolcall.index,
@@ -81,7 +93,8 @@ class OpenAITextChatClientExecutor(ClientExecutor):
                             partial["tool_name"] = toolcall.tool_name
                         if toolcall.tool_args:
                             partial["tool_args"] += toolcall.tool_args
-                        if toolcall.finish:
+                    case StreamChunkEmpty():
+                        if fragment.done:
                             _flush_toolcalls()
                     case _:
                         pass

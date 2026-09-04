@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ValidationError, create_model
 from dataclasses import dataclass
 
 from unified_llm.messages.messages import ToolMessage
-from unified_llm.messages.contents import ContentToolBase, ContentToolCall, ContentToolText
+from unified_llm.messages.contents import ContentAIToolCall, ContentToolBase, ContentToolText
 
 
 class ToolException(Exception):
@@ -25,7 +25,7 @@ class Tool(BaseModel, frozen=True):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedContentToolCall:
-    toolcall: ContentToolCall
+    toolcall: ContentAIToolCall
     tool: Tool
     args: BaseModel
 
@@ -86,7 +86,7 @@ class ToolExecutorBase(ABC):
     def list_tools(self) -> list[Tool]:
         return list(self._tools.values())
 
-    def _resolve_toolcall(self, toolcall: ContentToolCall) -> ResolvedContentToolCall | ToolMessage:
+    def _resolve_toolcall(self, toolcall: ContentAIToolCall) -> ResolvedContentToolCall | ToolMessage:
         tool_def = self._tools.get(toolcall.tool_name)
         if tool_def is None:
             return ToolMessage(
@@ -125,7 +125,7 @@ class ToolExecutorBase(ABC):
 
         return ResolvedContentToolCall(toolcall=toolcall, tool=tool_def, args=validated)
 
-    def _wrap_result(self, toolcall: ContentToolCall, result: Any) -> ToolMessage:
+    def _wrap_result(self, toolcall: ContentAIToolCall, result: Any) -> ToolMessage:
         contents: ContentToolBase | list[ContentToolBase]
         if isinstance(result, ContentToolBase):
             contents = [result]
@@ -135,7 +135,7 @@ class ToolExecutorBase(ABC):
             contents = ContentToolText(str(result))
         return ToolMessage(contents, toolcall=toolcall)
 
-    def execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]:
+    def execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
         if not toolcalls:
             return []
         match self._mode:
@@ -147,10 +147,10 @@ class ToolExecutorBase(ABC):
                 return self.mixed_execute(toolcalls)
 
     @abstractmethod
-    def sync_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...
 
     @abstractmethod
-    def async_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...
 
     @abstractmethod
-    def mixed_execute(self, toolcalls: list[ContentToolCall]) -> list[ToolMessage]: ...
+    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...

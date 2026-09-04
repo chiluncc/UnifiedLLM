@@ -179,6 +179,11 @@ class ContentHumanImage(ContentHumanBase):
 ################################
 
 
+class ContentAIReasoningBase(ContentAIBase, ABC):
+    @override
+    def copy(self) -> "ContentAIReasoningBase": ...
+
+
 class ContentAIText(ContentAIBase):
     def __init__(self, text: str):
         super().__init__()
@@ -193,36 +198,7 @@ class ContentAIText(ContentAIBase):
         return ContentAIText(self._text)
 
 
-################################
-
-
-class ContentReasoning(ContentBase):
-    def __init__(self, *, reasoning_content: str | None = None, reasoning_summary: str | None = None):
-        super().__init__()
-        self._reasoning_content: str | None = reasoning_content
-        self._reasoning_summary: str | None = reasoning_summary
-        if self._reasoning_content is None and self._reasoning_summary is None:
-            raise ContentException(
-                "ContentAIReasoning can't init: at least one of reasoning_content or reasoning_summary must be provided"
-            )
-
-    @property
-    def reasoning_content(self) -> str | None:
-        return self._reasoning_content
-
-    @property
-    def reasoning_summary(self) -> str | None:
-        return self._reasoning_summary
-
-    @override
-    def copy(self) -> "ContentReasoning":
-        return ContentReasoning(
-            reasoning_content=self._reasoning_content,
-            reasoning_summary=self._reasoning_summary,
-        )
-
-
-class ContentToolCall(ContentBase):
+class ContentAIToolCall(ContentAIBase):
     def __init__(self, tool_name: str, tool_args: str, tool_id: str):
         super().__init__()
         self._tool_name: str = tool_name
@@ -242,11 +218,40 @@ class ContentToolCall(ContentBase):
         return self._tool_id
 
     @override
-    def copy(self) -> "ContentToolCall":
-        return ContentToolCall(
+    def copy(self) -> "ContentAIToolCall":
+        return ContentAIToolCall(
             tool_name=self._tool_name,
             tool_args=self._tool_args,
             tool_id=self._tool_id,
+        )
+
+
+################################
+
+
+class ContentAIReasoningText(ContentAIReasoningBase):
+    def __init__(self, *, reasoning_content: str | None = None, reasoning_summary: str | None = None):
+        super().__init__()
+        self._reasoning_content: str | None = reasoning_content
+        self._reasoning_summary: str | None = reasoning_summary
+        if self._reasoning_content is None and self._reasoning_summary is None:
+            raise ContentException(
+                "ContentReasoningText can't init: at least one of reasoning_content or reasoning_summary must be provided"
+            )
+
+    @property
+    def reasoning_content(self) -> str | None:
+        return self._reasoning_content
+
+    @property
+    def reasoning_summary(self) -> str | None:
+        return self._reasoning_summary
+
+    @override
+    def copy(self) -> "ContentAIReasoningText":
+        return ContentAIReasoningText(
+            reasoning_content=self._reasoning_content,
+            reasoning_summary=self._reasoning_summary,
         )
 
 

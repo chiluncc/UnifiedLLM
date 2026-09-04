@@ -1,19 +1,22 @@
-from pydantic import BaseModel
+import uuid
+from pydantic import BaseModel, Field
 
 
 class StreamChunkBase(BaseModel, frozen=True): ...
 
 
 class StreamChunkEmpty(StreamChunkBase):
-    pass
+    done: bool = Field(default=False)
 
 
 class StreamChunkReasoning(StreamChunkBase):
     text: str
+    uuid: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class StreamChunkText(StreamChunkBase):
     text: str
+    uuid: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class StreamChunkToolCall(StreamChunkBase):

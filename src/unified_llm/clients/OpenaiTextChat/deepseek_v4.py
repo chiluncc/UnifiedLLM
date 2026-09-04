@@ -6,12 +6,17 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCo
 from .base import OpenAITextChatClientBase
 from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResult
 from unified_llm.messages.messages import MessageBase, AIMessage, HumanMessage, SystemMessage, ToolMessage
-from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
-from unified_llm.messages.contents import ContentAIText
+from unified_llm.messages.stream_chunk import (
+    StreamChunkBase,
+    StreamChunkEmpty,
+    StreamChunkReasoning,
+    StreamChunkText,
+    StreamChunkToolCall,
+)
+from unified_llm.messages.contents import ContentAIBase, ContentAIText, ContentAIReasoningText, ContentAIToolCall
 from unified_llm.messages.contents import ContentHumanText
 from unified_llm.messages.contents import ContentSystemText
 from unified_llm.messages.contents import ContentToolText
-from unified_llm.messages.contents import ContentReasoning, ContentToolCall
 
 
 class DeepSeekV4ClientConfig(ClientConfigBase):
@@ -51,30 +56,30 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
             return []
         raw = response.choices[0].message
 
-        contents: list[ContentAIText] = []
-        if raw.content is not None:
-            contents.append(ContentAIText(raw.content))
-
-        reasoning: ContentReasoning | None = None
+        contents: list[ContentAIBase] = []
         reasoning_content = getattr(raw, "reasoning_content", None)
         if isinstance(reasoning_content, str) and reasoning_content:
-            reasoning = ContentReasoning(reasoning_content=reasoning_content)
-
-        toolcalls: list[ContentToolCall] = []
+            contents.append(ContentAIReasoningText(reasoning_content=reasoning_content))
+        if raw.content is not None:
+            contents.append(ContentAIText(raw.content))
         for tc in raw.tool_calls or []:
-            toolcalls.append(
-                ContentToolCall(
+            contents.append(
+                ContentAIToolCall(
                     tool_name=tc.function.name,
                     tool_args=tc.function.arguments,
                     tool_id=tc.id,
                 )
             )
 
-        return [AIMessage(contents=contents, reasoning=reasoning, toolcalls=toolcalls)]
+        return [AIMessage(contents=contents)] if contents else []
 
     def _compute_expense(self, model: str, usage) -> TokenExpense:
         _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
             "deepseek-v4-flash": {
+                "peak": (0.10, 3.00, 9.00),
+                "offpeak": (0.05, 1.50, 4.50),
+            },
+            "deepseek-v4-flash-vision-exp": {
                 "peak": (0.10, 3.00, 9.00),
                 "offpeak": (0.05, 1.50, 4.50),
             },
@@ -122,32 +127,46 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
     def _unserialize_messages(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]:
         unserialized: list[ChatCompletionMessageParam] = []
         for message in messages:
-            if len(message) > 1:
-                raise ClientException("OpenAI text chat protocol only supports one content item per message")
             match message:
                 case SystemMessage():
+                    if len(message) != 1:
+                        raise ClientException("SystemMessage only supports ContentSystemText")
                     content = message[0]
                     if not isinstance(content, ContentSystemText):
                         raise ClientException("SystemMessage only supports ContentSystemText")
                     unserialized.append({"role": "system", "content": content.text})
                 case HumanMessage():
+                    if len(message) != 1:
+                        raise ClientException("HumanMessage only supports ContentHumanText")
                     content = message[0]
                     if not isinstance(content, ContentHumanText):
                         raise ClientException("HumanMessage only supports ContentHumanText")
                     unserialized.append({"role": "user", "content": content.text})
                 case AIMessage():
-                    assistant_msg: dict[str, Any] = {"role": "assistant", "content": None}
-                    if len(message) == 1:
-                        content = message[0]
-                        if not isinstance(content, ContentAIText):
-                            raise ClientException("AIMessage only supports ContentAIText")
-                        assistant_msg["content"] = content.text
-                    elif not message.toolcalls:
+                    text_parts: list[str] = []
+                    reasoning_parts: list[str] = []
+                    toolcalls: list[ContentAIToolCall] = []
+                    for content in message:
+                        match content:
+                            case ContentAIText():
+                                text_parts.append(content.text)
+                            case ContentAIReasoningText():
+                                if content.reasoning_content is not None:
+                                    reasoning_parts.append(content.reasoning_content)
+                            case ContentAIToolCall():
+                                toolcalls.append(content)
+                            case _:
+                                raise ClientException(
+                                    "AIMessage only supports ContentAIText/ContentAIReasoningText/ContentAIToolCall, "
+                                    f"got {type(content).__name__}"
+                                )
+                    if not text_parts and not toolcalls:
                         raise ClientException("AIMessage has empty content and no tool_calls")
-                    reasoning = message.reasoning
-                    if reasoning is not None and reasoning.reasoning_content is not None:
-                        assistant_msg["reasoning_content"] = reasoning.reasoning_content
-                    toolcalls = message.toolcalls
+                    assistant_msg: dict[str, Any] = {"role": "assistant", "content": None}
+                    if text_parts:
+                        assistant_msg["content"] = "".join(text_parts)
+                    if reasoning_parts:
+                        assistant_msg["reasoning_content"] = "".join(reasoning_parts)
                     if toolcalls:
                         assistant_msg["tool_calls"] = [
                             {
@@ -159,6 +178,8 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
                         ]
                     unserialized.append(assistant_msg)
                 case ToolMessage():
+                    if len(message) != 1:
+                        raise ClientException("ToolMessage only supports ContentToolText")
                     content = message[0]
                     if not isinstance(content, ContentToolText):
                         raise ClientException("ToolMessage only supports ContentToolText")
@@ -185,7 +206,6 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
         if not response_chunk.choices:
             return []
         choice = response_chunk.choices[0]
-        finish = choice.finish_reason == "tool_calls"
         fragments: list[StreamChunkBase] = []
 
         reasoning = getattr(choice.delta, "reasoning_content", None)
@@ -198,12 +218,13 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
             fragments.append(
                 StreamChunkToolCall(
                     index=tc.index,
-                    finish=finish,
                     tool_id=tc.id,
                     tool_name=function.name if function else None,
                     tool_args=function.arguments if function else None,
                 )
             )
+        if choice.finish_reason is not None:
+            fragments.append(StreamChunkEmpty(done=True))
         return fragments
 
     @override
@@ -241,22 +262,21 @@ class OpenAITextChatClientDeepSeekV4(OpenAITextChatClientBase):
                     if function.arguments:
                         partial["tool_args"] += function.arguments
 
-        contents = [ContentAIText("".join(text_parts))] if text_parts else []
         reasoning_content = "".join(reasoning_parts)
-        reasoning = ContentReasoning(reasoning_content=reasoning_content) if reasoning_content else None
-        toolcall_list = [
-            ContentToolCall(
-                tool_name=partial["tool_name"] or "",
-                tool_args=partial["tool_args"],
-                tool_id=partial["tool_id"] or "",
+        contents: list[ContentAIBase] = []
+        if reasoning_content:
+            contents.append(ContentAIReasoningText(reasoning_content=reasoning_content))
+        if text_parts:
+            contents.append(ContentAIText("".join(text_parts)))
+        for _, partial in sorted(toolcalls.items()):
+            contents.append(
+                ContentAIToolCall(
+                    tool_name=partial["tool_name"] or "",
+                    tool_args=partial["tool_args"],
+                    tool_id=partial["tool_id"] or "",
+                )
             )
-            for _, partial in sorted(toolcalls.items())
-        ]
-        messages = (
-            [AIMessage(contents=contents, reasoning=reasoning, toolcalls=toolcall_list)]
-            if contents or reasoning or toolcall_list
-            else []
-        )
+        messages = [AIMessage(contents=contents)] if contents else []
         return ClientResult(
             messages=messages,
             expense=self._compute_expense(model or "", usage),

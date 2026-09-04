@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import uuid
 import openai
 from abc import ABC, abstractmethod
 from docstring_parser import Style
@@ -9,7 +10,13 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCo
 from typing import override, Callable
 
 from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
+from unified_llm.messages.stream_chunk import (
+    StreamChunkBase,
+    StreamChunkEmpty,
+    StreamChunkReasoning,
+    StreamChunkText,
+    StreamChunkToolCall,
+)
 from unified_llm.tools import Tool
 from ..base import ClientBase, ClientConfigBase, RequestConfigBase
 from ..base import ClientResult, ClientExecutor, ClientException
@@ -39,9 +46,9 @@ class OpenAIMultiChatClientExecutor(ClientExecutor):
         )
 
         raw_chunks: list[ChatCompletionChunk] = []
-        reasoning: str = ""
-        text: str = ""
         pending_toolcalls: dict[int, dict[str, str | None]] = {}
+        current_kind: type | None = None
+        run_uuid: str | None = None
 
         def _flush_toolcalls() -> None:
             for index in sorted(pending_toolcalls):
@@ -62,15 +69,24 @@ class OpenAIMultiChatClientExecutor(ClientExecutor):
             raw_chunks.append(raw)
             for fragment in self._parse_stream_chunk(raw):
                 match fragment:
-                    case StreamChunkReasoning():
+                    case StreamChunkReasoning() as fragment:
                         if fragment.text:
-                            reasoning += fragment.text
-                            self._push_chunk(StreamChunkReasoning(text=reasoning))
-                    case StreamChunkText():
+                            if current_kind is not StreamChunkReasoning:
+                                current_kind = StreamChunkReasoning
+                                run_uuid = str(uuid.uuid4())
+                            self._push_chunk(
+                                fragment.model_copy(update={"uuid": run_uuid})
+                            )
+                    case StreamChunkText() as fragment:
                         if fragment.text:
-                            text += fragment.text
-                            self._push_chunk(StreamChunkText(text=text))
+                            if current_kind is not StreamChunkText:
+                                current_kind = StreamChunkText
+                                run_uuid = str(uuid.uuid4())
+                            self._push_chunk(
+                                fragment.model_copy(update={"uuid": run_uuid})
+                            )
                     case StreamChunkToolCall() as toolcall:
+                        current_kind = StreamChunkToolCall
                         partial = pending_toolcalls.setdefault(
                             toolcall.index,
                             {"tool_id": None, "tool_name": None, "tool_args": ""},
@@ -81,8 +97,11 @@ class OpenAIMultiChatClientExecutor(ClientExecutor):
                             partial["tool_name"] = toolcall.tool_name
                         if toolcall.tool_args:
                             partial["tool_args"] += toolcall.tool_args
-                        if toolcall.finish:
+                    case StreamChunkEmpty():
+                        if fragment.done:
                             _flush_toolcalls()
+                            current_kind = None
+                            run_uuid = None
                     case _:
                         pass
 
@@ -150,19 +169,7 @@ class OpenAIMultiChatClientBase(ClientBase, ABC):
     def _parse_response(self, response: ChatCompletion) -> ClientResult: ...
 
     @abstractmethod
-    def _parse_stream_chunk(self, response_chunk: ChatCompletionChunk) -> list[StreamChunkBase]:
-        """解析单个流式片段（增量）。
-
-        只产出文本类增量片段（reasoning/text/tool_calls），不解析 image 等；
-        若当前片段只能获得多媒体信息（如 image 类内容 part），返回 StreamChunkEmpty；
-        图片等多模态内容由 _parse_stream_chunk_full 在流结束时统一解析。
-        """
-        ...
+    def _parse_stream_chunk(self, response_chunk: ChatCompletionChunk) -> list[StreamChunkBase]: ...
 
     @abstractmethod
-    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResult:
-        """解析完整流式响应（流结束时调用）。
-
-        负责图片等多模态内容的最终解析，并统计 expense。
-        """
-        ...
+    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResult: ...
