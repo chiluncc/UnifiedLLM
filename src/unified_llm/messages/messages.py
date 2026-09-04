@@ -72,6 +72,10 @@ class AIMessage(MessageBase):
         self._reasoning: ContentReasoning | None = reasoning.copy() if reasoning is not None else None
         self._toolcalls: list[ContentToolCall] = list() if toolcalls is None else [t.copy() for t in toolcalls]
         self._additions: dict[str, Any] = dict() if additions is None else deepcopy(additions)
+        if not self._contents and not self._toolcalls:
+            raise MessageException(
+                "AIMessage can't init: contents and toolcalls can't both be empty"
+            )
 
     def __iter__(self) -> Iterator[ContentAIBase]:
         return super().__iter__()

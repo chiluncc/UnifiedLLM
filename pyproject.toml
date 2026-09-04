@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "docstring-parser>=0.18.0",
+    "filetype>=1.2.0",
     "jsonlines>=4.0.0",
     "openai>=3.6.0",
     "orjson>=3.12.0",
