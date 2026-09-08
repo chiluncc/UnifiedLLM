@@ -117,6 +117,7 @@ class OpenAIChatClientBase(ClientBase, ABC):
     def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
         super().__init__(client_config, request_config)
         self._client = openai.Client(**client_config.to_dict())
+        self._async_client = openai.AsyncClient(**client_config.to_dict())
 
     @override
     def invoke(self, messages: list[MessageBase]) -> ClientResult:
@@ -133,12 +134,11 @@ class OpenAIChatClientBase(ClientBase, ABC):
 
     @override
     async def ainvoke(self, messages: list[MessageBase]) -> ClientResult:
-        async with openai.AsyncClient(**self.get_client_config().to_dict()) as async_client:
-            response = await async_client.chat.completions.create(
-                messages=self._unserialize_messages(messages),
-                tools=self.get_tools(),
-                **self.get_request_config().to_dict(),
-            )
+        response = await self._async_client.chat.completions.create(
+            messages=self._unserialize_messages(messages),
+            tools=self.get_tools(),
+            **self.get_request_config().to_dict(),
+        )
         result = self._parse_response(response)
         return ClientResult(
             messages=messages + result.messages,
