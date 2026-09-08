@@ -7,8 +7,12 @@ from docstring_parser import parse as parse_docstring
 from pydantic import BaseModel, Field, ValidationError, create_model
 from dataclasses import dataclass
 
-from unified_llm.messages.messages import MessageTool
-from unified_llm.messages.contents import ContentAIToolCall, ContentToolBase, ContentToolText
+from unified_llm.messages import (
+    MessageTool,
+    ContentAIToolCall,
+    ContentToolBase,
+    ContentToolText,
+)
 
 
 class ToolException(Exception):

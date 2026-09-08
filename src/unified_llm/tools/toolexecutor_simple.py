@@ -2,8 +2,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, override
 
-from unified_llm.messages.contents import ContentAIToolCall
-from unified_llm.messages.messages import MessageTool
+from unified_llm.messages import (
+    ContentAIToolCall,
+    MessageTool,
+)
 from .base import Tool, ToolExecutorBase
 
 

@@ -9,8 +9,8 @@ from docstring_parser import parse as parse_docstring
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCompletionChunk
 from typing import override, Callable
 
-from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.stream_chunks import (
+from unified_llm.messages import (
+    MessageBase,
     StreamChunkBase,
     StreamChunkEmpty,
     StreamChunkReasoning,

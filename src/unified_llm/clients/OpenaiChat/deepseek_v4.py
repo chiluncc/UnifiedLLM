@@ -5,18 +5,27 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCo
 
 from .base import OpenAIChatClientBase
 from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResultInner
-from unified_llm.messages.messages import MessageBase, MessageAI, MessageHuman, MessageSystem, MessageTool
-from unified_llm.messages.stream_chunks import (
+from unified_llm.messages import (
+    MessageBase,
+    MessageAI,
+    MessageHuman,
+    MessageSystem,
+    MessageTool,
     StreamChunkBase,
     StreamChunkEmpty,
     StreamChunkReasoning,
     StreamChunkText,
     StreamChunkToolCall,
+    ContentAIBase,
+    ContentAIText,
+    ContentAIReasoningText,
+    ContentAIToolCall,
+    ContentHumanText,
+    ContentHumanImage,
+    ContentSystemText,
+    ContentToolText,
+    ContentToolImage,
 )
-from unified_llm.messages.contents import ContentAIBase, ContentAIText, ContentAIReasoningText, ContentAIToolCall
-from unified_llm.messages.contents import ContentHumanText, ContentHumanImage
-from unified_llm.messages.contents import ContentSystemText
-from unified_llm.messages.contents import ContentToolText, ContentToolImage
 
 
 class DeepSeekV4ClientConfig(ClientConfigBase):
