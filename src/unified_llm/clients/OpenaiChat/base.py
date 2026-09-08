@@ -19,7 +19,7 @@ from unified_llm.messages.stream_chunks import (
 )
 from unified_llm.tools import Tool
 from ..base import ClientBase, ClientConfigBase, RequestConfigBase
-from ..base import ClientResult, ClientExecutor, ClientException
+from ..base import ClientResult, ClientResultInner, ClientExecutor, ClientException
 
 
 class OpenAIChatClientExecutor(ClientExecutor):
@@ -32,7 +32,7 @@ class OpenAIChatClientExecutor(ClientExecutor):
         self._conversation: list[MessageBase] = messages
         self._tools: list = client.get_tools()
         self._parse_stream_chunk: Callable[[ChatCompletionChunk], list[StreamChunkBase]] = client._parse_stream_chunk
-        self._parse_stream_chunk_full: Callable[[list[ChatCompletionChunk]], ClientResult] = client._parse_stream_chunk_full
+        self._parse_stream_chunk_full: Callable[[list[ChatCompletionChunk]], ClientResultInner] = client._parse_stream_chunk_full
         self._thread_start()
 
     def _thread_content(self) -> ClientResult:
@@ -108,8 +108,8 @@ class OpenAIChatClientExecutor(ClientExecutor):
         _flush_toolcalls()
         result = self._parse_stream_chunk_full(raw_chunks)
         return ClientResult(
-            messages=self._conversation + result["messages"],
-            expense=result["expense"],
+            messages=self._conversation + result.messages,
+            expense=result.expense,
         )
 
 
@@ -127,8 +127,8 @@ class OpenAIChatClientBase(ClientBase, ABC):
         )
         result = self._parse_response(response)
         return ClientResult(
-            messages=messages + result["messages"],
-            expense=result["expense"],
+            messages=messages + result.messages,
+            expense=result.expense,
         )
 
     @override
@@ -141,8 +141,8 @@ class OpenAIChatClientBase(ClientBase, ABC):
             )
         result = self._parse_response(response)
         return ClientResult(
-            messages=messages + result["messages"],
-            expense=result["expense"],
+            messages=messages + result.messages,
+            expense=result.expense,
         )
 
     @override
@@ -166,10 +166,10 @@ class OpenAIChatClientBase(ClientBase, ABC):
     def _unserialize_messages(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]: ...
 
     @abstractmethod
-    def _parse_response(self, response: ChatCompletion) -> ClientResult: ...
+    def _parse_response(self, response: ChatCompletion) -> ClientResultInner: ...
 
     @abstractmethod
     def _parse_stream_chunk(self, response_chunk: ChatCompletionChunk) -> list[StreamChunkBase]: ...
 
     @abstractmethod
-    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResult: ...
+    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResultInner: ...

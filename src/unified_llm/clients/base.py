@@ -1,10 +1,13 @@
 import queue
 import threading
+from dataclasses import dataclass
 from typing import TypedDict, Iterator, Any
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 from unified_llm.messages.messages import MessageBase
+from unified_llm.messages.messages import MessageAI
+from unified_llm.messages.contents import ContentAIText, ContentAIReasoningText, ContentAIToolCall
 from unified_llm.messages.stream_chunks import StreamChunkBase, StreamChunkEmpty
 from unified_llm.tools import ToolExecutorBase, Tool
 
@@ -21,9 +24,33 @@ class TokenExpense(TypedDict):
     token_expense: float | None
 
 
-class ClientResult(TypedDict):
+@dataclass(frozen=True, slots=True)
+class ClientResultInner:
     messages: list[MessageBase]
     expense: TokenExpense
+
+
+@dataclass(frozen=True, slots=True)
+class ClientResult:
+    messages: list[MessageBase]
+    expense: TokenExpense
+
+    def _last_content(self, types: Any) -> list:
+        if self.messages:
+            last = self.messages[-1]
+            if isinstance(last, MessageAI):
+                type_filter = tuple(types) if isinstance(types, list) else (types,)
+                return [content for content in last if isinstance(content, type_filter)]
+        return []
+
+    def get_reasonings(self) -> list[ContentAIReasoningText]:
+        return self._last_content(ContentAIReasoningText)
+
+    def get_contents(self) -> list[ContentAIText]:
+        return self._last_content(ContentAIText)
+
+    def get_toolcalls(self) -> list[ContentAIToolCall]:
+        return self._last_content(ContentAIToolCall)
 
 
 class ClientExecutor(ABC):

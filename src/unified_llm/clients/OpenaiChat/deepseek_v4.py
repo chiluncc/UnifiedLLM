@@ -4,7 +4,7 @@ from typing import Any, override, Literal
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCompletionChunk
 
 from .base import OpenAIChatClientBase
-from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResult
+from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResultInner
 from unified_llm.messages.messages import MessageBase, MessageAI, MessageHuman, MessageSystem, MessageTool
 from unified_llm.messages.stream_chunks import (
     StreamChunkBase,
@@ -229,8 +229,8 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
         return unserialized
 
     @override
-    def _parse_response(self, response: ChatCompletion) -> ClientResult:
-        return ClientResult(
+    def _parse_response(self, response: ChatCompletion) -> ClientResultInner:
+        return ClientResultInner(
             messages=self._serialize_response(response),
             expense=self._compute_expense(response.model, response.usage),
         )
@@ -262,7 +262,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
         return fragments
 
     @override
-    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResult:
+    def _parse_stream_chunk_full(self, response_chunks: list[ChatCompletionChunk]) -> ClientResultInner:
         reasoning_parts: list[str] = []
         text_parts: list[str] = []
         toolcalls: dict[int, dict[str, str | None]] = {}
@@ -311,7 +311,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
                 )
             )
         messages = [MessageAI(contents=contents)] if contents else []
-        return ClientResult(
+        return ClientResultInner(
             messages=messages,
             expense=self._compute_expense(model or "", usage),
         )
