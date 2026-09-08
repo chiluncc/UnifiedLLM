@@ -3,10 +3,10 @@ from pydantic import Field
 from typing import Any, override, Literal
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCompletionChunk
 
-from .base import OpenAIMultiChatClientBase
+from .base import OpenAIChatClientBase
 from ..base import ClientConfigBase, RequestConfigBase, TokenExpense, ClientException, ClientResult
-from unified_llm.messages.messages import MessageBase, AIMessage, HumanMessage, SystemMessage, ToolMessage
-from unified_llm.messages.stream_chunk import (
+from unified_llm.messages.messages import MessageBase, MessageAI, MessageHuman, MessageSystem, MessageTool
+from unified_llm.messages.stream_chunks import (
     StreamChunkBase,
     StreamChunkEmpty,
     StreamChunkReasoning,
@@ -47,7 +47,7 @@ class DeepSeekV4RequestConfig(RequestConfigBase):
             }
 
 
-class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
+class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
     def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
         super().__init__(client_config, request_config)
 
@@ -71,7 +71,7 @@ class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
                 )
             )
 
-        return [AIMessage(contents=contents)] if contents else []
+        return [MessageAI(contents=contents)] if contents else []
 
     def _compute_expense(self, model: str, usage) -> TokenExpense:
         _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
@@ -128,14 +128,14 @@ class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
         unserialized: list[ChatCompletionMessageParam] = []
         for message in messages:
             match message:
-                case SystemMessage():
+                case MessageSystem():
                     if len(message) != 1:
                         raise ClientException("SystemMessage only supports ContentSystemText")
                     content = message[0]
                     if not isinstance(content, ContentSystemText):
                         raise ClientException("SystemMessage only supports ContentSystemText")
                     unserialized.append({"role": "system", "content": content.text})
-                case HumanMessage():
+                case MessageHuman():
                     content_parts: list[dict[str, Any]] = []
                     for content in message:
                         match content:
@@ -159,7 +159,7 @@ class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
                     if not content_parts:
                         raise ClientException("HumanMessage can't be empty")
                     unserialized.append({"role": "user", "content": content_parts})
-                case AIMessage():
+                case MessageAI():
                     text_parts: list[str] = []
                     reasoning_parts: list[str] = []
                     toolcalls: list[ContentAIToolCall] = []
@@ -194,45 +194,36 @@ class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
                             for tc in toolcalls
                         ]
                     unserialized.append(assistant_msg)
-                case ToolMessage():
-                    if len(message) == 1 and isinstance(message[0], ContentToolText):
-                        unserialized.append(
-                            {
-                                "role": "tool",
-                                "content": message[0].text,
-                                "tool_call_id": message.toolcall.tool_id,
-                            }
-                        )
-                    else:
-                        content_parts: list[dict[str, Any]] = []
-                        for content in message:
-                            match content:
-                                case ContentToolText():
-                                    content_parts.append({"type": "text", "text": content.text})
-                                case ContentToolImage():
-                                    content_parts.append(
-                                        {
-                                            "type": "image_url",
-                                            "image_url": {
-                                                "url": content.img_url,
-                                                "detail": content.detail,
-                                            },
-                                        }
-                                    )
-                                case _:
-                                    raise ClientException(
-                                        "ToolMessage only supports ContentToolText/ContentToolImage, "
-                                        f"got {type(content).__name__}"
-                                    )
-                        if not content_parts:
-                            raise ClientException("ToolMessage can't be empty")
-                        unserialized.append(
-                            {
-                                "role": "tool",
-                                "content": content_parts,
-                                "tool_call_id": message.toolcall.tool_id,
-                            }
-                        )
+                case MessageTool():
+                    content_parts: list[dict[str, Any]] = []
+                    for content in message:
+                        match content:
+                            case ContentToolText():
+                                content_parts.append({"type": "text", "text": content.text})
+                            case ContentToolImage():
+                                content_parts.append(
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": content.img_url,
+                                            "detail": content.detail,
+                                        },
+                                    }
+                                )
+                            case _:
+                                raise ClientException(
+                                    "ToolMessage only supports ContentToolText/ContentToolImage, "
+                                    f"got {type(content).__name__}"
+                                )
+                    if not content_parts:
+                        raise ClientException("ToolMessage can't be empty")
+                    unserialized.append(
+                        {
+                            "role": "tool",
+                            "content": content_parts,
+                            "tool_call_id": message.toolcall.tool_id,
+                        }
+                    )
                 case _:
                     raise ClientException(f"Unsupported message type: {type(message).__name__}")
         return unserialized
@@ -319,7 +310,7 @@ class OpenAIMultiChatClientDeepSeekV4(OpenAIMultiChatClientBase):
                     tool_id=partial["tool_id"] or "",
                 )
             )
-        messages = [AIMessage(contents=contents)] if contents else []
+        messages = [MessageAI(contents=contents)] if contents else []
         return ClientResult(
             messages=messages,
             expense=self._compute_expense(model or "", usage),

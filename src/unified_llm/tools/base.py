@@ -7,7 +7,7 @@ from docstring_parser import parse as parse_docstring
 from pydantic import BaseModel, Field, ValidationError, create_model
 from dataclasses import dataclass
 
-from unified_llm.messages.messages import ToolMessage
+from unified_llm.messages.messages import MessageTool
 from unified_llm.messages.contents import ContentAIToolCall, ContentToolBase, ContentToolText
 
 
@@ -86,10 +86,10 @@ class ToolExecutorBase(ABC):
     def list_tools(self) -> list[Tool]:
         return list(self._tools.values())
 
-    def _resolve_toolcall(self, toolcall: ContentAIToolCall) -> ResolvedContentToolCall | ToolMessage:
+    def _resolve_toolcall(self, toolcall: ContentAIToolCall) -> ResolvedContentToolCall | MessageTool:
         tool_def = self._tools.get(toolcall.tool_name)
         if tool_def is None:
-            return ToolMessage(
+            return MessageTool(
                 ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
                 toolcall=toolcall,
             )
@@ -97,14 +97,14 @@ class ToolExecutorBase(ABC):
         try:
             raw_args = json.loads(toolcall.tool_args or "{}")
         except json.JSONDecodeError:
-            return ToolMessage(
+            return MessageTool(
                 ContentToolText(
                     f"Invalid JSON args for tool {toolcall.tool_name}: {toolcall.tool_args!r}"
                 ),
                 toolcall=toolcall,
             )
         if not isinstance(raw_args, dict):
-            return ToolMessage(
+            return MessageTool(
                 ContentToolText(f"Tool args must be a JSON object, got: {toolcall.tool_args!r}"),
                 toolcall=toolcall,
             )
@@ -121,11 +121,11 @@ class ToolExecutorBase(ABC):
                     f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
                 )
                 text = f"Invalid arguments: {details}"
-            return ToolMessage(ContentToolText(text), toolcall=toolcall)
+            return MessageTool(ContentToolText(text), toolcall=toolcall)
 
         return ResolvedContentToolCall(toolcall=toolcall, tool=tool_def, args=validated)
 
-    def _wrap_result(self, toolcall: ContentAIToolCall, result: Any) -> ToolMessage:
+    def _wrap_result(self, toolcall: ContentAIToolCall, result: Any) -> MessageTool:
         contents: ContentToolBase | list[ContentToolBase]
         if isinstance(result, ContentToolBase):
             contents = [result]
@@ -133,9 +133,9 @@ class ToolExecutorBase(ABC):
             contents = result
         else:
             contents = ContentToolText(str(result))
-        return ToolMessage(contents, toolcall=toolcall)
+        return MessageTool(contents, toolcall=toolcall)
 
-    def execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
+    def execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
         if not toolcalls:
             return []
         match self._mode:
@@ -147,10 +147,10 @@ class ToolExecutorBase(ABC):
                 return self.mixed_execute(toolcalls)
 
     @abstractmethod
-    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...
+    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...
 
     @abstractmethod
-    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...
+    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...
 
     @abstractmethod
-    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]: ...
+    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...

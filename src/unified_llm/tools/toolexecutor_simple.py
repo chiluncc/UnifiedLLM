@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, override
 
 from unified_llm.messages.contents import ContentAIToolCall
-from unified_llm.messages.messages import ToolMessage
+from unified_llm.messages.messages import MessageTool
 from .base import Tool, ToolExecutorBase
 
 
@@ -22,11 +22,11 @@ class ToolExecutorSimple(ToolExecutorBase):
     def __init__(self, tools: list[Tool]) -> None:
         super().__init__(tools)
 
-    def _execute_serial(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
-        results: list[ToolMessage] = []
+    def _execute_serial(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
+        results: list[MessageTool] = []
         for toolcall in toolcalls:
             resolved = self._resolve_toolcall(toolcall)
-            if isinstance(resolved, ToolMessage):
+            if isinstance(resolved, MessageTool):
                 results.append(resolved)
                 continue
             if resolved.tool.sync:
@@ -37,13 +37,13 @@ class ToolExecutorSimple(ToolExecutorBase):
         return results
 
     @override
-    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
+    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
         return self._execute_serial(toolcalls)
 
     @override
-    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
+    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
         return self._execute_serial(toolcalls)
 
     @override
-    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[ToolMessage]:
+    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
         return self._execute_serial(toolcalls)

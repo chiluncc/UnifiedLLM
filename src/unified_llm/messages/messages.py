@@ -41,7 +41,7 @@ class MessageBase(ABC):
 ################################
 
 
-class SystemMessage(MessageBase):
+class MessageSystem(MessageBase):
     def __init__(self, contents: list[ContentSystemBase] | ContentSystemBase) -> None:
         super().__init__(contents)
 
@@ -49,11 +49,11 @@ class SystemMessage(MessageBase):
         return super().__iter__()
 
     @override
-    def copy(self) -> "SystemMessage":
-        return SystemMessage(self._contents)
+    def copy(self) -> "MessageSystem":
+        return MessageSystem(self._contents)
 
 
-class HumanMessage(MessageBase):
+class MessageHuman(MessageBase):
     def __init__(self, contents: list[ContentHumanBase] | ContentHumanBase) -> None:
         super().__init__(contents)
 
@@ -61,11 +61,11 @@ class HumanMessage(MessageBase):
         return super().__iter__()
 
     @override
-    def copy(self) -> "HumanMessage":
-        return HumanMessage(self._contents)
+    def copy(self) -> "MessageHuman":
+        return MessageHuman(self._contents)
 
 
-class AIMessage(MessageBase):
+class MessageAI(MessageBase):
     def __init__(
         self,
         contents: list[ContentAIBase] | ContentAIBase,
@@ -75,14 +75,14 @@ class AIMessage(MessageBase):
         super().__init__(contents)
         self._additions: dict[str, Any] = dict() if additions is None else deepcopy(additions)
         if not self._contents:
-            raise MessageException("AIMessage can't init: contents can't be empty")
+            raise MessageException("MessageAI can't init: contents can't be empty")
 
     def __iter__(self) -> Iterator[ContentAIBase]:
         return super().__iter__()
 
     @override
-    def copy(self) -> "AIMessage":
-        return AIMessage(
+    def copy(self) -> "MessageAI":
+        return MessageAI(
             self._contents,
             additions=self._additions,
         )
@@ -92,7 +92,7 @@ class AIMessage(MessageBase):
         return deepcopy(self._additions)
 
 
-class ToolMessage(MessageBase):
+class MessageTool(MessageBase):
     def __init__(
         self,
         contents: list[ContentToolBase] | ContentToolBase,
@@ -105,8 +105,8 @@ class ToolMessage(MessageBase):
         return super().__iter__()
 
     @override
-    def copy(self) -> "ToolMessage":
-        return ToolMessage(self._contents, toolcall=self._toolcall.copy())
+    def copy(self) -> "MessageTool":
+        return MessageTool(self._contents, toolcall=self._toolcall.copy())
 
     @property
     def toolcall(self) -> ContentAIToolCall:

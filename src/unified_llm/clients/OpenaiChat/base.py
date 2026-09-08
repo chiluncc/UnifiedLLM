@@ -10,7 +10,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam, ChatCo
 from typing import override, Callable
 
 from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.stream_chunk import (
+from unified_llm.messages.stream_chunks import (
     StreamChunkBase,
     StreamChunkEmpty,
     StreamChunkReasoning,
@@ -22,8 +22,8 @@ from ..base import ClientBase, ClientConfigBase, RequestConfigBase
 from ..base import ClientResult, ClientExecutor, ClientException
 
 
-class OpenAITextChatClientExecutor(ClientExecutor):
-    def __init__(self, client: OpenAITextChatClientBase, messages: list[MessageBase]):
+class OpenAIChatClientExecutor(ClientExecutor):
+    def __init__(self, client: OpenAIChatClientBase, messages: list[MessageBase]):
         super().__init__()
         self._client: openai.Client = client._client
         self._request_config: dict = client.get_request_config().to_dict()
@@ -46,18 +46,9 @@ class OpenAITextChatClientExecutor(ClientExecutor):
         )
 
         raw_chunks: list[ChatCompletionChunk] = []
-        class_uuids: dict[type, str] = {}
         pending_toolcalls: dict[int, dict[str, str | None]] = {}
-
-        def _class_uuid(fragment: StreamChunkReasoning | StreamChunkText) -> str:
-            return class_uuids.setdefault(type(fragment), str(uuid.uuid4()))
-
-        def _push_text_fragment(fragment: StreamChunkReasoning | StreamChunkText) -> None:
-            if not fragment.text:
-                return
-            self._push_chunk(
-                fragment.model_copy(update={"uuid": _class_uuid(fragment)})
-            )
+        current_kind: type | None = None
+        run_uuid: str | None = None
 
         def _flush_toolcalls() -> None:
             for index in sorted(pending_toolcalls):
@@ -78,11 +69,24 @@ class OpenAITextChatClientExecutor(ClientExecutor):
             raw_chunks.append(raw)
             for fragment in self._parse_stream_chunk(raw):
                 match fragment:
-                    case StreamChunkReasoning():
-                        _push_text_fragment(fragment)
-                    case StreamChunkText():
-                        _push_text_fragment(fragment)
+                    case StreamChunkReasoning() as fragment:
+                        if fragment.text:
+                            if current_kind is not StreamChunkReasoning:
+                                current_kind = StreamChunkReasoning
+                                run_uuid = str(uuid.uuid4())
+                            self._push_chunk(
+                                fragment.model_copy(update={"uuid": run_uuid})
+                            )
+                    case StreamChunkText() as fragment:
+                        if fragment.text:
+                            if current_kind is not StreamChunkText:
+                                current_kind = StreamChunkText
+                                run_uuid = str(uuid.uuid4())
+                            self._push_chunk(
+                                fragment.model_copy(update={"uuid": run_uuid})
+                            )
                     case StreamChunkToolCall() as toolcall:
+                        current_kind = StreamChunkToolCall
                         partial = pending_toolcalls.setdefault(
                             toolcall.index,
                             {"tool_id": None, "tool_name": None, "tool_args": ""},
@@ -96,6 +100,8 @@ class OpenAITextChatClientExecutor(ClientExecutor):
                     case StreamChunkEmpty():
                         if fragment.done:
                             _flush_toolcalls()
+                            current_kind = None
+                            run_uuid = None
                     case _:
                         pass
 
@@ -107,11 +113,11 @@ class OpenAITextChatClientExecutor(ClientExecutor):
         )
 
 
-class OpenAITextChatClientBase(ClientBase, ABC):
+class OpenAIChatClientBase(ClientBase, ABC):
     def __init__(self, client_config: ClientConfigBase, request_config: RequestConfigBase):
         super().__init__(client_config, request_config)
         self._client = openai.Client(**client_config.to_dict())
-        
+
     @override
     def invoke(self, messages: list[MessageBase]) -> ClientResult:
         response = self._client.chat.completions.create(
@@ -140,8 +146,8 @@ class OpenAITextChatClientBase(ClientBase, ABC):
         )
 
     @override
-    def execute(self, messages: list[MessageBase]) -> OpenAITextChatClientExecutor:
-        return OpenAITextChatClientExecutor(self, messages)
+    def execute(self, messages: list[MessageBase]) -> OpenAIChatClientExecutor:
+        return OpenAIChatClientExecutor(self, messages)
 
     @override
     def _serialize_tool(self, tool: Tool) -> dict:
@@ -155,7 +161,7 @@ class OpenAITextChatClientBase(ClientBase, ABC):
                 "parameters": tool.args.model_json_schema(),
             },
         }
-    
+
     @abstractmethod
     def _unserialize_messages(self, messages: list[MessageBase]) -> list[ChatCompletionMessageParam]: ...
 

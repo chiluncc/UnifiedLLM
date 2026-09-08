@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 from unified_llm.messages.messages import MessageBase
-from unified_llm.messages.stream_chunk import StreamChunkBase, StreamChunkEmpty
+from unified_llm.messages.stream_chunks import StreamChunkBase, StreamChunkEmpty
 from unified_llm.tools import ToolExecutorBase, Tool
 
 
