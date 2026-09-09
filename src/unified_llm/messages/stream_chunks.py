@@ -21,7 +21,7 @@ class StreamChunkText(StreamChunkBase):
 
 class StreamChunkToolCall(StreamChunkBase):
     index: int
-    finish: bool = False
+    whole: bool = False
     tool_id: str | None = None
     tool_name: str | None = None
     tool_args: str | None = None
