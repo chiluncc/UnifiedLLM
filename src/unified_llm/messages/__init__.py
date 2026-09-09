@@ -1,10 +1,10 @@
-from .contents import ContentBase, ContentSystemBase, ContentHumanBase, ContentAIBase, ContentToolBase
+from .contents import ContentBase, ContentSystemBase, ContentHumanBase, ContentAIBase, ContentToolBase, ContentException
 from .contents import ContentSystemText
 from .contents import ContentHumanText, ContentHumanImage
 from .contents import ContentAIReasoningBase, ContentAIReasoningText, ContentAIText, ContentAIToolCall
 from .contents import ContentToolText, ContentToolImage
 
-from .messages import MessageBase
+from .messages import MessageBase, MessageException
 from .messages import MessageSystem, MessageHuman, MessageAI, MessageTool
 
 from .stream_chunks import StreamChunkBase, StreamChunkEmpty, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
@@ -16,6 +16,7 @@ __all__ = [
     "ContentAIText",
     "ContentAIToolCall",
     "ContentBase",
+    "ContentException",
     "ContentHumanBase",
     "ContentHumanImage",
     "ContentHumanText",
@@ -26,6 +27,7 @@ __all__ = [
     "ContentToolText",
     "MessageAI",
     "MessageBase",
+    "MessageException",
     "MessageHuman",
     "MessageSystem",
     "MessageTool",

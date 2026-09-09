@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import override
+from typing import Self, Any
 
 
 class ContentException(Exception):
@@ -9,24 +9,27 @@ class ContentException(Exception):
 
 class ContentBase(ABC):
     @abstractmethod
-    def copy(self) -> "ContentBase": ...
+    def copy(self) -> Self: ...
+
+    @classmethod
+    @abstractmethod
+    def from_json(cls, data: dict[str, Any]) -> Self: ...
+
+    @abstractmethod
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "class": type(self).__name__,
+            "values": None,
+            }
 
 
-class ContentSystemBase(ContentBase, ABC):
-    @override
-    def copy(self) -> "ContentSystemBase": ...
+class ContentSystemBase(ContentBase, ABC): ...
 
 
-class ContentHumanBase(ContentBase, ABC):
-    @override
-    def copy(self) -> "ContentHumanBase": ...
+class ContentHumanBase(ContentBase, ABC): ...
 
 
-class ContentAIBase(ContentBase, ABC):
-    @override
-    def copy(self) -> "ContentAIBase": ...
+class ContentAIBase(ContentBase, ABC): ...
 
 
-class ContentToolBase(ContentBase, ABC):
-    @override
-    def copy(self) -> "ContentToolBase": ...
+class ContentToolBase(ContentBase, ABC): ...

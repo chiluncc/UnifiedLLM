@@ -1,7 +1,7 @@
 import base64
 import filetype
 from pathlib import Path
-from typing import Literal, override
+from typing import Any, Literal, Self, override
 from urllib.parse import urlsplit
 
 from .base import ContentException, ContentHumanBase
@@ -17,8 +17,19 @@ class ContentHumanText(ContentHumanBase):
         return self._text
 
     @override
-    def copy(self) -> "ContentHumanText":
+    def copy(self) -> Self:
         return ContentHumanText(self._text)
+
+    @classmethod
+    @override
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        return ContentHumanText(data["values"]["_text"])
+
+    @override
+    def to_json(self) -> dict[str, Any]:
+        json_block = super().to_json()
+        json_block["values"] = {"_text": self._text}
+        return json_block
 
 
 class ContentHumanImage(ContentHumanBase):
@@ -79,7 +90,7 @@ class ContentHumanImage(ContentHumanBase):
         img_type: str | None,
         img_base64: str | None,
         detail: Literal["auto", "low", "high", "original"],
-    ) -> "ContentHumanImage":
+    ) -> Self:
         instance = cls.__new__(cls)
         instance._mode = mode
         instance._source = source
@@ -116,7 +127,7 @@ class ContentHumanImage(ContentHumanBase):
         return self._detail
 
     @override
-    def copy(self) -> "ContentHumanImage":
+    def copy(self) -> Self:
         return ContentHumanImage._from_loaded(
             mode=self._mode,
             source=self._source,
@@ -125,3 +136,31 @@ class ContentHumanImage(ContentHumanBase):
             img_base64=self._base64,
             detail=self._detail,
         )
+
+    @classmethod
+    @override
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        values = data["values"]
+        path_value = values["_path"]
+        path = Path(path_value) if path_value is not None else None
+        return cls._from_loaded(
+            mode=values["_mode"],
+            source=values["_source"],
+            path=path,
+            img_type=values["_type"],
+            img_base64=values["_base64"],
+            detail=values["_detail"],
+        )
+
+    @override
+    def to_json(self) -> dict[str, Any]:
+        json_block = super().to_json()
+        json_block["values"] = {
+            "_mode": self._mode,
+            "_source": self._source,
+            "_path": str(self._path) if self._path is not None else None,
+            "_type": self._type,
+            "_base64": self._base64,
+            "_detail": self._detail,
+        }
+        return json_block

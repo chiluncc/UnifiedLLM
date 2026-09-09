@@ -1,12 +1,12 @@
 from abc import ABC
-from typing import override
+from typing import Any, Self, override
 
 from .base import ContentAIBase, ContentException
 
 
 class ContentAIReasoningBase(ContentAIBase, ABC):
     @override
-    def copy(self) -> "ContentAIReasoningBase": ...
+    def copy(self) -> Self: ...
 
 
 class ContentAIReasoningText(ContentAIReasoningBase):
@@ -28,11 +28,29 @@ class ContentAIReasoningText(ContentAIReasoningBase):
         return self._reasoning_summary
 
     @override
-    def copy(self) -> "ContentAIReasoningText":
+    def copy(self) -> Self:
         return ContentAIReasoningText(
             reasoning_content=self._reasoning_content,
             reasoning_summary=self._reasoning_summary,
         )
+
+    @classmethod
+    @override
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        values = data["values"]
+        return cls(
+            reasoning_content=values["_reasoning_content"],
+            reasoning_summary=values["_reasoning_summary"],
+        )
+
+    @override
+    def to_json(self) -> dict[str, Any]:
+        json_block = super().to_json()
+        json_block["values"] = {
+            "_reasoning_content": self._reasoning_content,
+            "_reasoning_summary": self._reasoning_summary,
+        }
+        return json_block
 
 
 class ContentAIText(ContentAIBase):
@@ -50,8 +68,20 @@ class ContentAIText(ContentAIBase):
         return self._annotations.copy()
 
     @override
-    def copy(self) -> "ContentAIText":
+    def copy(self) -> Self:
         return ContentAIText(self._text, annotations=self._annotations)
+
+    @classmethod
+    @override
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        values = data["values"]
+        return cls(text=values["_text"], annotations=values["_annotations"])
+
+    @override
+    def to_json(self) -> dict[str, Any]:
+        json_block = super().to_json()
+        json_block["values"] = {"_text": self._text, "_annotations": self._annotations}
+        return json_block
 
 
 class ContentAIToolCall(ContentAIBase):
@@ -74,9 +104,29 @@ class ContentAIToolCall(ContentAIBase):
         return self._tool_id
 
     @override
-    def copy(self) -> "ContentAIToolCall":
+    def copy(self) -> Self:
         return ContentAIToolCall(
             tool_name=self._tool_name,
             tool_args=self._tool_args,
             tool_id=self._tool_id,
         )
+
+    @classmethod
+    @override
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        values = data["values"]
+        return cls(
+            tool_name=values["_tool_name"],
+            tool_args=values["_tool_args"],
+            tool_id=values["_tool_id"],
+        )
+
+    @override
+    def to_json(self) -> dict[str, Any]:
+        json_block = super().to_json()
+        json_block["values"] = {
+            "_tool_name": self._tool_name,
+            "_tool_args": self._tool_args,
+            "_tool_id": self._tool_id,
+        }
+        return json_block
