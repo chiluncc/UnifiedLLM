@@ -6,6 +6,7 @@ from .contents import ContentToolText, ContentToolImage
 
 from .messages import MessageBase, MessageException
 from .messages import MessageSystem, MessageHuman, MessageAI, MessageTool
+from .messages import messages_from_json, messages_to_json
 
 from .stream_chunks import StreamChunkBase, StreamChunkEmpty, StreamChunkReasoning, StreamChunkText, StreamChunkToolCall
 
@@ -36,4 +37,7 @@ __all__ = [
     "StreamChunkReasoning",
     "StreamChunkText",
     "StreamChunkToolCall",
+
+    "messages_from_json",
+    "messages_to_json",
 ]
