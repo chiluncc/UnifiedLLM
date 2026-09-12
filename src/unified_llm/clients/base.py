@@ -65,6 +65,7 @@ class ClientExecutor(ABC):
         self._queue: queue.Queue[Any] = queue.Queue()
         self._result: ClientResult | None = None
         self._exception: Exception | None = None
+        self._done_chunk_sent = False
         self._thread = threading.Thread(target=self._thread_container, daemon=True)
 
     def __iter__(self) -> Iterator[StreamChunkBase]:
@@ -72,7 +73,10 @@ class ClientExecutor(ABC):
 
     def __next__(self) -> StreamChunkBase:
         if self._done_event.is_set() and self._queue.empty():
-            raise StopIteration
+            if self._done_chunk_sent:
+                raise StopIteration
+            self._done_chunk_sent = True
+            return StreamChunkEmpty(done=True)
         try:
             return self._queue.get(timeout=0.1)
         except queue.Empty:

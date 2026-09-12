@@ -76,6 +76,8 @@ class ToolExecutorBase(ABC):
     def __init__(self, tools: list[Tool]) -> None:
         super().__init__()
         self._tools: dict[str, Tool] = {t.name: t for t in tools}
+        if len(self._tools) != len(tools):
+            raise ToolException("there are tools with duplicate names")
 
         def _classify_mode() -> Literal["sync", "async", "mixed"]:
             sync_flags = [tool_def.sync for tool_def in self._tools.values()]
@@ -86,6 +88,8 @@ class ToolExecutorBase(ABC):
             return "mixed"
 
         self._mode = _classify_mode()
+        if self._mode not in self._allow_mode():
+            raise ToolException(f"{type(self).__name__} can't running in {self._mode} mode")
 
     def list_tools(self) -> list[Tool]:
         return list(self._tools.values())
@@ -149,6 +153,9 @@ class ToolExecutorBase(ABC):
                 return self.async_execute(toolcalls)
             case "mixed":
                 return self.mixed_execute(toolcalls)
+
+    def _allow_mode(self) -> list[Literal["sync", "async", "mixed"]]:
+        return ["sync", "async", "mixed"]
 
     @abstractmethod
     def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...

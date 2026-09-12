@@ -38,7 +38,7 @@ class DeepSeekV4ClientConfig(ClientConfigBase):
 
 
 class DeepSeekV4RequestConfig(RequestConfigBase):
-    model: Literal["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"] = Field(default="deepseek-v4-flash-vision-exp")
+    model: Literal["deepseek-flash", "deepseek-v4-pro"] = Field(default="deepseek-flash")
     reasoning_effort: Literal["none", "low", "high", "max"] = Field(default="high")
 
     @override
@@ -85,12 +85,8 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
     def _compute_expense(self, model: str, usage) -> TokenExpense:
         _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
             "deepseek-v4-flash": {
-                "peak": (0.10, 3.00, 9.00),
-                "offpeak": (0.05, 1.50, 4.50),
-            },
-            "deepseek-v4-flash-vision-exp": {
-                "peak": (0.10, 3.00, 9.00),
-                "offpeak": (0.05, 1.50, 4.50),
+                "peak": (0.04, 2.00, 8.00),
+                "offpeak": (0.02, 1.00, 4.00),
             },
             "deepseek-v4-pro": {
                 "peak": (0.30, 9.00, 27.00),
