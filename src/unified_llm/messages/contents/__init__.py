@@ -8,7 +8,14 @@ from .base import (
 )
 from .system import ContentSystemText
 from .human import ContentHumanText, ContentHumanImage
-from .ai import ContentAIReasoningBase, ContentAIReasoningText, ContentAIText, ContentAIToolCall
+from .ai import (
+    ContentAIReasoningBase,
+    ContentAIReasoningText,
+    ContentAIServerBase,
+    ContentAIServerWebSearchCall,
+    ContentAIText,
+    ContentAIToolCall,
+)
 from .tool import ContentToolText, ContentToolImage
 
 
@@ -19,6 +26,7 @@ _CONTENT_JSON_CLASSES: tuple[type[ContentBase], ...] = (
     ContentAIReasoningText,
     ContentAIText,
     ContentAIToolCall,
+    ContentAIServerWebSearchCall,
     ContentToolText,
     ContentToolImage,
 )
@@ -66,6 +74,8 @@ __all__ = [
     "ContentAIBase",
     "ContentAIReasoningBase",
     "ContentAIReasoningText",
+    "ContentAIServerBase",
+    "ContentAIServerWebSearchCall",
     "ContentAIText",
     "ContentAIToolCall",
     "ContentBase",

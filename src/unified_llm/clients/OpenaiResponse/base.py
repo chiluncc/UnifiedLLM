@@ -127,7 +127,7 @@ class OpenAIResponseClientExecutor(ClientExecutor):
                             current_kind = None
                             run_uuid = None
                     case _:
-                        pass
+                        self._push_chunk(fragment)
 
         _flush_toolcalls()
         result = self._parse_stream_events_full(raw_events)

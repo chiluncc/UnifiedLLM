@@ -13,6 +13,7 @@ from openai.types.responses import (
     ResponseReasoningItem,
     ResponseOutputMessage,
     ResponseFunctionToolCall,
+    ResponseFunctionWebSearch,
     ResponseOutputItemDoneEvent,
     ResponseOutputItemAddedEvent,
     ResponseReasoningTextDeltaEvent,
@@ -30,10 +31,14 @@ from unified_llm.messages import (
     StreamChunkReasoning,
     StreamChunkText,
     StreamChunkToolCall,
+    StreamChunkWebSearch,
+    StreamChunkWebOpenPage,
+    StreamChunkWebFindInPage,
     ContentAIBase,
     ContentAIText,
     ContentAIReasoningText,
     ContentAIToolCall,
+    ContentAIServerWebSearchCall,
     ContentHumanText,
     ContentHumanImage,
     ContentSystemText,
@@ -53,6 +58,7 @@ from .base import OpenAIResponseClientBase
 class DeepSeekV4ResponseRequestConfig(RequestConfigBase):
     model: Literal["deepseek-flash", "deepseek-v4-pro"] = Field(default="deepseek-flash")
     reasoning_effort: Literal["none", "low", "high", "max"] = Field(default="high")
+    web_search: bool = Field(default=False)
 
     @override
     def to_dict(self) -> dict[str, Any]:
@@ -86,6 +92,38 @@ class OpenAIResponseClientDeepSeekV4(OpenAIResponseClientBase):
             item["content"] = [{"type": "reasoning_text", "text": content.reasoning_content}]
         return item
 
+    def _web_search_fields(
+        self,
+        action: Any,
+    ) -> tuple[Literal["search", "open_page", "find_in_page"], dict[str, Any]] | None:
+        action_type = getattr(action, "type", None)
+        if action_type == "search":
+            queries = list(getattr(action, "queries", None) or [])
+            if not queries:
+                query = getattr(action, "query", None)
+                if query:
+                    queries = [query]
+            return "search", {"queries": queries}
+        if action_type == "open_page":
+            url = getattr(action, "url", None)
+            if not url:
+                return None
+            return "open_page", {"url": url}
+        if action_type == "find_in_page":
+            url = getattr(action, "url", None)
+            pattern = getattr(action, "pattern", None)
+            if not url or not pattern:
+                return None
+            return "find_in_page", {"url": url, "pattern": pattern}
+        return None
+
+    def _web_search_action(self, content: ContentAIServerWebSearchCall) -> dict[str, Any]:
+        if content.action_type == "search":
+            return {"type": "search", "queries": content.queries or []}
+        if content.action_type == "open_page":
+            return {"type": "open_page", "url": content.url}
+        return {"type": "find_in_page", "url": content.url, "pattern": content.pattern}
+
     def _serialize_ai_message(self, message: MessageAI) -> list[Any]:
         items: list[Any] = []
         for content in message:
@@ -116,10 +154,23 @@ class OpenAIResponseClientDeepSeekV4(OpenAIResponseClientBase):
                             "arguments": content.tool_args,
                         }
                     )
+                case ContentAIServerWebSearchCall():
+                    items.append(
+                        {
+                            "type": "web_search_call",
+                            "status": "completed",
+                            "action": self._web_search_action(content),
+                        }
+                    )
                 case _:
                     raise ClientException(f"Unsupported AI content type: {type(content).__name__}")
         if not items:
             raise ClientException("AIMessage has empty content and no tool_calls")
+        response_ids = message.additions.get("response_ids")
+        if isinstance(response_ids, list) and len(response_ids) == len(items):
+            for item, item_id in zip(items, response_ids):
+                if isinstance(item_id, str) and item_id:
+                    item["id"] = item_id
         return items
 
     def _serialize_tool_message(self, message: MessageTool) -> dict[str, Any]:
@@ -153,64 +204,79 @@ class OpenAIResponseClientDeepSeekV4(OpenAIResponseClientBase):
             "output": output,
         }
 
-    def _contents_from_items(self, items: list[Any]) -> list[ContentAIBase]:
-        contents: list[ContentAIBase] = []
-        for item in items:
-            match item:
-                case ResponseReasoningItem():
-                    reasoning_content = "".join(
-                        part.text
-                        for part in item.content or []
-                        if isinstance(getattr(part, "text", None), str)
-                    ) or None
-                    reasoning_summary = "".join(
-                        part.text
-                        for part in item.summary or []
-                        if isinstance(getattr(part, "text", None), str)
-                    ) or None
-                    if reasoning_content is not None or reasoning_summary is not None:
-                        contents.append(
-                            ContentAIReasoningText(
-                                reasoning_content=reasoning_content,
-                                reasoning_summary=reasoning_summary,
-                            )
-                        )
-                case ResponseOutputMessage():
-                    for part in item.content or []:
-                        if isinstance(part, ResponseOutputRefusal):
-                            raise ClientException(f"Model refused to answer: {part.refusal}")
-                        if not isinstance(part, ResponseOutputText):
-                            continue
-                        contents.append(
-                            ContentAIText(
-                                part.text,
-                                annotations=[
-                                    annotation.model_dump(mode="json", exclude_none=True)
-                                    for annotation in part.annotations or []
-                                ],
-                            )
-                        )
-                case ResponseFunctionToolCall():
-                    contents.append(
-                        ContentAIToolCall(
-                            tool_name=item.name,
-                            tool_args=item.arguments,
-                            tool_id=item.call_id,
+    def _content_from_item(self, item: Any) -> list[ContentAIBase]:
+        match item:
+            case ResponseReasoningItem():
+                reasoning_content = "".join(
+                    part.text
+                    for part in item.content or []
+                    if isinstance(getattr(part, "text", None), str)
+                ) or None
+                reasoning_summary = "".join(
+                    part.text
+                    for part in item.summary or []
+                    if isinstance(getattr(part, "text", None), str)
+                ) or None
+                if reasoning_content is None and reasoning_summary is None:
+                    return []
+                return [
+                    ContentAIReasoningText(
+                        reasoning_content=reasoning_content,
+                        reasoning_summary=reasoning_summary,
+                    )
+                ]
+            case ResponseOutputMessage():
+                texts: list[ContentAIBase] = []
+                for part in item.content or []:
+                    if isinstance(part, ResponseOutputRefusal):
+                        raise ClientException(f"Model refused to answer: {part.refusal}")
+                    if not isinstance(part, ResponseOutputText):
+                        continue
+                    texts.append(
+                        ContentAIText(
+                            part.text,
+                            annotations=[
+                                annotation.model_dump(mode="json", exclude_none=True)
+                                for annotation in part.annotations or []
+                            ],
                         )
                     )
-                case _:
-                    continue
-        return contents
+                return texts
+            case ResponseFunctionToolCall():
+                return [
+                    ContentAIToolCall(
+                        tool_name=item.name,
+                        tool_args=item.arguments,
+                        tool_id=item.call_id,
+                    )
+                ]
+            case ResponseFunctionWebSearch():
+                normalized = self._web_search_fields(item.action)
+                if normalized is None:
+                    return []
+                action_type, fields = normalized
+                return [ContentAIServerWebSearchCall(action_type, **fields)]
+            case _:
+                return []
 
     def _build_result(
         self,
         items: list[Any],
         expense: TokenExpense,
     ) -> ClientResultInner:
-        contents = self._contents_from_items(items)
+        contents: list[ContentAIBase] = []
+        response_ids: list[str] = []
+        for item in items:
+            item_contents = self._content_from_item(item)
+            if not item_contents:
+                continue
+            contents.extend(item_contents)
+            item_id = getattr(item, "id", None)
+            if isinstance(item_id, str) and item_id:
+                response_ids.append(item_id)
         messages: list[MessageBase] = []
         if contents:
-            messages.append(MessageAI(contents=contents))
+            messages.append(MessageAI(contents=contents, additions={"response_ids": response_ids}))
         return ClientResultInner(messages=messages, expense=expense)
 
     def _compute_expense(self, model: str, usage: Any) -> TokenExpense:
@@ -341,6 +407,21 @@ class OpenAIResponseClientDeepSeekV4(OpenAIResponseClientBase):
                         tool_args=response_event.delta,
                     )
                 ]
+            case ResponseOutputItemDoneEvent():
+                item = response_event.item
+                if not isinstance(item, ResponseFunctionWebSearch):
+                    return []
+                normalized = self._web_search_fields(item.action)
+                if normalized is None:
+                    return []
+                action_type, fields = normalized
+                if action_type == "search":
+                    return [StreamChunkWebSearch(queries=fields["queries"])]
+                if action_type == "open_page":
+                    return [StreamChunkWebOpenPage(url=fields["url"])]
+                return [
+                    StreamChunkWebFindInPage(url=fields["url"], pattern=fields["pattern"])
+                ]
             case ResponseCompletedEvent() | ResponseIncompleteEvent():
                 return [StreamChunkEmpty(done=True)]
             case _:
@@ -371,3 +452,11 @@ class OpenAIResponseClientDeepSeekV4(OpenAIResponseClientBase):
                 token_expense=None,
             ),
         )
+
+    @override
+    def get_tools(self) -> list[Any]:
+        tools = list(super().get_tools())
+        request_config = self.get_request_config()
+        if request_config.web_search:
+            tools.append({"type": "web_search"})
+        return tools
