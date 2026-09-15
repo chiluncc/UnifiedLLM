@@ -1,4 +1,5 @@
 from abc import ABC
+from copy import deepcopy
 from typing import Any, Self, override
 
 from .base import ContentAIBase, ContentException
@@ -54,18 +55,18 @@ class ContentAIReasoningText(ContentAIReasoningBase):
 
 
 class ContentAIText(ContentAIBase):
-    def __init__(self, text: str, *, annotations: list[str] | None = None):
+    def __init__(self, text: str, *, annotations: list[dict[str, Any]] | None = None):
         super().__init__()
         self._text: str = text
-        self._annotations = annotations if annotations is not None else []
+        self._annotations: list[dict[str, Any]] = deepcopy(annotations) if annotations is not None else []
 
     @property
     def text(self) -> str:
         return self._text
 
     @property
-    def annotations(self) -> list[str]:
-        return self._annotations.copy()
+    def annotations(self) -> list[dict[str, Any]]:
+        return deepcopy(self._annotations)
 
     @override
     def copy(self) -> Self:

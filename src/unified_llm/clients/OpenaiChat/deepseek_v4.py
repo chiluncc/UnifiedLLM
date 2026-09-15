@@ -84,7 +84,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
 
     def _compute_expense(self, model: str, usage) -> TokenExpense:
         _DEEPSEEK_V4_PRICES: dict[str, dict[str, tuple[float, float, float]]] = {
-            "deepseek-v4-flash": {
+            "deepseek-flash": {
                 "peak": (0.04, 2.00, 8.00),
                 "offpeak": (0.02, 1.00, 4.00),
             },
@@ -135,10 +135,14 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
             match message:
                 case MessageSystem():
                     if len(message) != 1:
-                        raise ClientException("SystemMessage only supports ContentSystemText")
+                        raise ClientException(
+                            f"SystemMessage accepts exactly one content, got {len(message)}"
+                        )
                     content = message[0]
                     if not isinstance(content, ContentSystemText):
-                        raise ClientException("SystemMessage only supports ContentSystemText")
+                        raise ClientException(
+                            f"Unsupported system content type: {type(content).__name__}"
+                        )
                     unserialized.append({"role": "system", "content": content.text})
                 case MessageHuman():
                     content_parts: list[dict[str, Any]] = []
@@ -158,8 +162,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
                                 )
                             case _:
                                 raise ClientException(
-                                    "HumanMessage only supports ContentHumanText/ContentHumanImage, "
-                                    f"got {type(content).__name__}"
+                                    f"Unsupported human content type: {type(content).__name__}"
                                 )
                     if not content_parts:
                         raise ClientException("HumanMessage can't be empty")
@@ -179,8 +182,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
                                 toolcalls.append(content)
                             case _:
                                 raise ClientException(
-                                    "AIMessage only supports ContentAIText/ContentAIReasoningText/ContentAIToolCall, "
-                                    f"got {type(content).__name__}"
+                                    f"Unsupported AI content type: {type(content).__name__}"
                                 )
                     if not text_parts and not toolcalls:
                         raise ClientException("AIMessage has empty content and no tool_calls")
@@ -217,8 +219,7 @@ class OpenAIChatClientDeepSeekV4(OpenAIChatClientBase):
                                 )
                             case _:
                                 raise ClientException(
-                                    "ToolMessage only supports ContentToolText/ContentToolImage, "
-                                    f"got {type(content).__name__}"
+                                    f"Unsupported tool content type: {type(content).__name__}"
                                 )
                     if not content_parts:
                         raise ClientException("ToolMessage can't be empty")

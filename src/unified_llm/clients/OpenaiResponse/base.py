@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from docstring_parser import Style
 from docstring_parser import parse as parse_docstring
 from typing import Any, override, Callable
-
 from openai.types.responses import (
     Response,
     ResponseInputParam,
@@ -90,7 +89,7 @@ class OpenAIResponseClientExecutor(ClientExecutor):
                     f"Response stream failed: {event.response.error}"
                 )
             if isinstance(event, ResponseErrorEvent):
-                raise ClientException(f"Response stream error: {event.error}")
+                raise ClientException(f"Response stream error: {event.message}")
             raw_events.append(event)
             for fragment in self._parse_stream_event(event):
                 match fragment:
@@ -212,4 +211,3 @@ class OpenAIResponseClientBase(ClientBase, ABC):
 
     @abstractmethod
     def _parse_stream_events_full(self, response_events: list[ResponseStreamEvent]) -> ClientResultInner: ...
-
