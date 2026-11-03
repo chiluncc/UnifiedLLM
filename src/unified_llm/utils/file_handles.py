@@ -8,44 +8,38 @@ from pathlib import Path
 import logging
 
 
-def _standard_path(path: str | Path) -> Path:
-    if isinstance(path, Path):
-        return path
-    return Path(path)
-
-
 def txt_load(path: str | Path) -> str:
-    path = _standard_path(path)
+    path = Path(path)
     load_data = path.read_text(encoding="utf-8")
     return load_data
 
 
-def txt_save(data: str, path: str | Path) -> None:
-    path = _standard_path(path)
+def txt_dump(data: str, path: str | Path) -> None:
+    path = Path(path)
     path.write_text(data, encoding="utf-8")
 
 
 def json_load(path: str | Path) -> Any:
-    path = _standard_path(path)
+    path = Path(path)
     load_data = orjson.loads(path.read_bytes())
     return load_data
 
 
-def json_save(data: Any, path: str | Path) -> None:
-    path = _standard_path(path)
+def json_dump(data: Any, path: str | Path) -> None:
+    path = Path(path)
     dump_data = orjson.dumps(data, option=orjson.OPT_INDENT_2)
     path.write_bytes(dump_data)
 
 
 def json_safe_load(path: str | Path) -> Any:
-    path = _standard_path(path)
+    path = Path(path)
     with open(path, "rb") as f:
         load_data = json.load(f)
     return load_data
 
 
-def json_safe_save(data: Any, path: str | Path) -> None:
-    path = _standard_path(path)
+def json_safe_dump(data: Any, path: str | Path) -> None:
+    path = Path(path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -54,45 +48,37 @@ def json_loads(s: str) -> Any:
     return json.loads(s)
 
 
-def json_saves(data: Any, *, indent: int=None) -> str:
+def json_dumps(data: Any, *, indent: int=None) -> str:
     return json.dumps(data, ensure_ascii=False, indent=indent)
 
 
 def yaml_load(path: str | Path) -> Any:
-    path = _standard_path(path)
+    path = Path(path)
     load_data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return load_data
 
+def yaml_dump(data: Any, path: str | Path) -> None:
+    path = Path(path)
+    yaml.safe_dump(data, path.open("w", encoding="utf-8"))
+
 
 def jsonl_load(path: str | Path) -> Any:
-    path = _standard_path(path)
+    path = Path(path)
     with jsonlines.open(path, "r") as f:
         load_data = [i for i in f]
     return load_data
 
 
-def jsonl_save(data: Iterable[Any], path: str | Path) -> None:
-    path = _standard_path(path)
+def jsonl_dump(data: Iterable[Any], path: str | Path) -> None:
+    path = Path(path)
     with jsonlines.open(path, "w") as f:
         f.write_all(data)
-
-
-_llm_keys_read_lock = threading.Lock()
-_llm_keys: dict[str, dict[str, str]] = {}
-def keys_load(path: str | Path | None = None) -> dict[str, str]:
-    global _llm_keys
-    path = _standard_path(path) if path is not None else Path(".keys/llm.yaml")
-    key = str(path.resolve())
-    with _llm_keys_read_lock:
-        if key not in _llm_keys:
-            _llm_keys[key] = yaml_load(path)
-        return _llm_keys[key]
 
 
 _loggers: dict[str, logging.Logger] = {}
 _loggers_lock = threading.Lock()
 def get_logger(path: str | Path, *, level: int=logging.DEBUG) -> logging.Logger:
-    path = _standard_path(path)
+    path = Path(path)
     key = str(path.resolve())
     with _loggers_lock:
         if key in _loggers:
@@ -125,3 +111,15 @@ def get_default_logger(logger: logging.Logger | None) -> logging.Logger:
             _null_logger = logging.getLogger("null")
             _null_logger.addHandler(logging.NullHandler())
         return _null_logger
+
+
+_llm_keys: dict[str, dict[str, str]] = {}
+_llm_keys_read_lock = threading.Lock()
+def secret_keys_load(path: str | Path | None = None) -> dict[str, str]:
+    global _llm_keys
+    path = Path(path) if path is not None else Path(".keys/llm.yaml")
+    key = str(path.resolve())
+    with _llm_keys_read_lock:
+        if key not in _llm_keys:
+            _llm_keys[key] = yaml_load(path)
+        return _llm_keys[key]

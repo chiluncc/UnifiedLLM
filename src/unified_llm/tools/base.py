@@ -1,167 +1,73 @@
 import inspect
-import json
-from typing import Any, Callable, Literal, get_type_hints
-from abc import ABC, abstractmethod
-from docstring_parser import Style
-from docstring_parser import parse as parse_docstring
-from pydantic import BaseModel, Field, ValidationError, create_model
-from dataclasses import dataclass
+from docstring_parser import parse
+from typing import Callable, override, overload, Iterator, Any
+from pydantic import BaseModel, create_model, Field
 
-from unified_llm.messages import (
-    MessageTool,
-    ContentAIToolCall,
-    ContentToolBase,
-    ContentToolText,
-)
+from unified_llm.base_structures.runable import Runable
 
 
-class ToolException(Exception):
-    def __init__(self, *args):
-        super().__init__(*args)
-
-
-class Tool(BaseModel, frozen=True):
-    name: str
-    args: type[BaseModel]
-    sync: bool
-    func: Callable
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedContentToolCall:
-    toolcall: ContentAIToolCall
-    tool: Tool
-    args: BaseModel
-
-
-def tool(func: Callable | None = None, *, name: str | None = None) -> Tool | Callable[..., Any]:
-    def _parse_docstring(fn: Callable) -> dict[str, str]:
-        doc = parse_docstring(inspect.getdoc(fn) or "", style=Style.GOOGLE)
-        return {p.arg_name: p.description for p in doc.params if p.description}
-
-    def _build_args_model(fn: Callable, param_descs: dict[str, str]) -> type[BaseModel]:
-        type_hints = get_type_hints(fn)
-        fields: dict[str, tuple[Any, Any]] = {}
-        for param_name, param in inspect.signature(fn).parameters.items():
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            annotation = type_hints.get(param_name, param.annotation)
-            if annotation is inspect.Parameter.empty:
-                annotation = Any
-            default: Any = ... if param.default is inspect.Parameter.empty else param.default
-            desc = param_descs.get(param_name)
-            if desc:
-                fields[param_name] = (annotation, Field(default, description=desc))
-            else:
-                fields[param_name] = (annotation, default)
-        return create_model(f"{fn.__name__}Args", **fields)
-
-    def _decorator(fn: Callable) -> Tool:
-        tool_name = name if name is not None else fn.__name__
-        param_descs = _parse_docstring(fn)
-        args_model = _build_args_model(fn, param_descs)
-        return Tool(
-            name=tool_name,
-            args=args_model,
-            sync=not inspect.iscoroutinefunction(fn),
-            func=fn,
-        )
-
-    if func is None:
-        return _decorator
-    return _decorator(func)
-
-
-class ToolExecutorBase(ABC):
-    def __init__(self, tools: list[Tool]) -> None:
+class Tool(Runable):
+    def __init__(self, func: Callable, *, name: str | None = None, docstring: str | None = None) -> None:
         super().__init__()
-        self._tools: dict[str, Tool] = {t.name: t for t in tools}
-        if len(self._tools) != len(tools):
-            raise ToolException("there are tools with duplicate names")
 
-        def _classify_mode() -> Literal["sync", "async", "mixed"]:
-            sync_flags = [tool_def.sync for tool_def in self._tools.values()]
-            if all(sync_flags):
-                return "sync"
-            if not any(sync_flags):
-                return "async"
-            return "mixed"
+        if inspect.iscoroutinefunction(func):
+            raise TypeError("Async function not supported.")
 
-        self._mode = _classify_mode()
-        if self._mode not in self._allow_mode():
-            raise ToolException(f"{type(self).__name__} can't running in {self._mode} mode")
+        tool_signature = inspect.signature(func)
+        tool_docstring = parse(inspect.getdoc(func))
 
-    def list_tools(self) -> list[Tool]:
-        return list(self._tools.values())
+        self._name: str = func.__name__ if name is None else name
+        self._description: str | None = tool_docstring.description if docstring is None else docstring
 
-    def _resolve_toolcall(self, toolcall: ContentAIToolCall) -> ResolvedContentToolCall | MessageTool:
-        tool_def = self._tools.get(toolcall.tool_name)
-        if tool_def is None:
-            return MessageTool(
-                ContentToolText(f"Unknown tool: {toolcall.tool_name}"),
-                toolcall=toolcall,
-            )
+        par_name2desp = {i.arg_name: i.description for i in tool_docstring.params}
+        fields = {}
+        for name, param in tool_signature.parameters.items():
+            if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+                raise TypeError("Tool parameters of kind VAR_KEYWORD (**kwargs) or VAR_POSITIONAL (*args) are not supported.")
+            
+            annotation = Any if param.annotation is inspect.Parameter.empty else param.annotation
+            default = ... if param.default is inspect.Parameter.empty else param.default
+            fields[name] = (annotation, Field(default=default, description=par_name2desp.get(name)))
+        
+        self._params: type[BaseModel] = create_model(f"{func.__name__}_config", __doc__=self._description, **fields)
+        self._func: Callable = func
 
-        try:
-            raw_args = json.loads(toolcall.tool_args or "{}")
-        except json.JSONDecodeError:
-            return MessageTool(
-                ContentToolText(
-                    f"Invalid JSON args for tool {toolcall.tool_name}: {toolcall.tool_args!r}"
-                ),
-                toolcall=toolcall,
-            )
-        if not isinstance(raw_args, dict):
-            return MessageTool(
-                ContentToolText(f"Tool args must be a JSON object, got: {toolcall.tool_args!r}"),
-                toolcall=toolcall,
-            )
+    @override
+    def invoke(self, params: dict) -> dict:
+        # TODO 需要 ToolMessage 以及 AIMessage 的 AIMetaTool 定义后才能完成
+        raise NotImplementedError
 
-        try:
-            validated = tool_def.args.model_validate(raw_args)
-        except ValidationError as exc:
-            errors = exc.errors()
-            missing = [str(err["loc"][0]) for err in errors if err["type"] == "missing"]
-            if missing:
-                text = f"Missing required arguments: {', '.join(missing)}"
-            else:
-                details = "; ".join(
-                    f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in errors
-                )
-                text = f"Invalid arguments: {details}"
-            return MessageTool(ContentToolText(text), toolcall=toolcall)
+    @override
+    def stream(self, params: dict) -> Iterator[dict]:
+        # TODO 需要 ToolMessage 以及 AIMessage 的 AIMetaTool 定义后才能完成
+        raise NotImplementedError
 
-        return ResolvedContentToolCall(toolcall=toolcall, tool=tool_def, args=validated)
+    @property
+    def name(self) -> str:
+        return self._name
 
-    def _wrap_result(self, toolcall: ContentAIToolCall, result: Any) -> MessageTool:
-        contents: ContentToolBase | list[ContentToolBase]
-        if isinstance(result, ContentToolBase):
-            contents = [result]
-        elif isinstance(result, list) and all(isinstance(item, ContentToolBase) for item in result):
-            contents = result
-        else:
-            contents = ContentToolText(str(result))
-        return MessageTool(contents, toolcall=toolcall)
+    @property
+    def description(self) -> str | None:
+        return self._description
 
-    def execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]:
-        if not toolcalls:
-            return []
-        match self._mode:
-            case "sync":
-                return self.sync_execute(toolcalls)
-            case "async":
-                return self.async_execute(toolcalls)
-            case "mixed":
-                return self.mixed_execute(toolcalls)
+    @property
+    def params(self) -> type[BaseModel]:
+        return self._params
 
-    def _allow_mode(self) -> list[Literal["sync", "async", "mixed"]]:
-        return ["sync", "async", "mixed"]
 
-    @abstractmethod
-    def sync_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...
+@overload
+def tool(func: Callable) -> Tool:
+    ...
 
-    @abstractmethod
-    def async_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...
 
-    @abstractmethod
-    def mixed_execute(self, toolcalls: list[ContentAIToolCall]) -> list[MessageTool]: ...
+@overload
+def tool(name: str | None = None, docstring: str | None = None) -> Callable[[Callable], Tool]:
+    ...
+
+
+def tool(func: Callable | None = None, *, name: str | None = None, docstring: str | None = None) -> Callable[[Callable], Tool] | Tool:
+    def transfer_tool(func: Callable) -> Tool:
+        return Tool(func, name=name, docstring=docstring)
+    if func is not None:
+        return transfer_tool(func)
+    return transfer_tool
