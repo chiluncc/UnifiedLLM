@@ -48,7 +48,7 @@ def json_loads(s: str) -> Any:
     return json.loads(s)
 
 
-def json_dumps(data: Any, *, indent: int=None) -> str:
+def json_dumps(data: Any, *, indent: int = None) -> str:
     return json.dumps(data, ensure_ascii=False, indent=indent)
 
 
@@ -77,7 +77,9 @@ def jsonl_dump(data: Iterable[Any], path: str | Path) -> None:
 
 _loggers: dict[str, logging.Logger] = {}
 _loggers_lock = threading.Lock()
-def get_logger(path: str | Path, *, level: int=logging.DEBUG) -> logging.Logger:
+def get_logger(
+    path: str | Path, *, level: int = logging.DEBUG
+) -> logging.Logger:
     path = Path(path)
     key = str(path.resolve())
     with _loggers_lock:
@@ -90,10 +92,12 @@ def get_logger(path: str | Path, *, level: int=logging.DEBUG) -> logging.Logger:
 
         handler = logging.FileHandler(path, mode="w", encoding="utf-8")
         handler.setLevel(level)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s | %(levelname)-8s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         logger.addHandler(handler)
 
         _loggers[key] = logger
@@ -102,7 +106,7 @@ def get_logger(path: str | Path, *, level: int=logging.DEBUG) -> logging.Logger:
 
 _null_logger: logging.Logger | None = None
 _null_logger_lock = threading.Lock()
-def get_default_logger(logger: logging.Logger | None) -> logging.Logger:
+def get_default_logger(logger: logging.Logger | None = None) -> logging.Logger:
     global _null_logger
     if logger is not None:
         return logger
